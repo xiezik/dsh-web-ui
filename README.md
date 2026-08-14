@@ -1,5 +1,27 @@
 # dsh-web-ui · DSH Web UI
 
+> **本 fork（xiezik）定制说明**：基于上游 [zhu1090093659/dsh-web-ui](https://github.com/zhu1090093659/dsh-web-ui)，
+> 主要定制在 **dsh-pet 桌宠插件**：皮肤化架构（可选"鲸鱼娘 / 爱弥斯·半身像素"）、
+> 工具感知气泡（toolPhase 细分动画 + 安全摘要 + failed 状态）、内容感知气泡/面板锚点、
+> 气泡美术升级（状态着色双层气泡 + 毛玻璃 + 三角尾巴）与底部挂靠投影。
+> 完整记录见 aemeath-opencode-pet 仓库 `docs/dsh-aemeath-pet.md`。
+
+## 素材来源与许可声明（Acknowledge）
+
+本 fork 的 dsh-pet 新增皮肤 `packages/dsh-pet/assets/aemeath-bust/` 使用以下 **MIT 授权** 上游素材：
+
+| 素材 | 来源 | 许可 |
+|---|---|---|
+| **爱弥斯像素源 GIF**（screen1-7 屏幕待机表情等） | [gitee.com/lzy-buaa-jdi/ameath](https://gitee.com/lzy-buaa-jdi/ameath) | MIT（Copyright (c) 2026 sinlatansen） |
+| **爱弥斯工作特写图集**（fetching/searching/analyzing/building/failed/waiting/celebrating 行） | [github.com/77wliNd/aemeath_withclaude](https://github.com/77wliNd/aemeath_withclaude) | MIT |
+
+详细归属与使用说明见 `packages/dsh-pet/assets/aemeath-bust/NOTICE.md`。
+
+> **注意**：爱弥斯（Aemeath）角色及其视觉设定归库洛游戏（Kuro Games）所有；
+> 上游像素素材以 MIT 授权分发，本 fork 仅作个人使用；二次分发请遵守上游各自的许可要求。
+
+---
+
 中文 | [English](README.en.md)
 
 ![dsh-web-ui](docs/dsh-web-ui-banner.png)
