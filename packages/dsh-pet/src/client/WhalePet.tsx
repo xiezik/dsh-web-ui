@@ -98,6 +98,8 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
   const [imageReady, setImageReady] = useState(false)
   const [frameCounts, setFrameCounts] = useState<number[] | null>(null)
   const [layoutByRow, setLayoutByRow] = useState<number[] | null>(null)
+  // 完成类气泡（done/failed）短暂显示后自动隐藏；活跃类（thinking/tool）持续。
+  const [transientHidden, setTransientHidden] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
@@ -242,6 +244,18 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
     return () => window.clearTimeout(timer)
   }, [feedback])
 
+  // Completion bubbles (done/failed) auto-hide after 2.5s: a "完成！" bubble
+  // lingering forever after the session finished reads as stale. Active
+  // bubbles (thinking/tool) stay visible while work progresses.
+  useEffect(() => {
+    if (snapshot === null) return
+    const isTransient = snapshot.phase === 'done' || snapshot.phase === 'failed'
+    setTransientHidden(false)
+    if (!isTransient) return
+    const timer = window.setTimeout(() => setTransientHidden(true), 2500)
+    return () => window.clearTimeout(timer)
+  }, [snapshot?.phase, snapshot?.bubble])
+
   // Dragging: pointer events on the sprite; position is right/bottom based.
   // `draggedRef` records whether the pointer actually moved, so the browser's
   // trailing click (fired after pointerup) does not pet the whale.
@@ -338,7 +352,7 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
       <div className={styles.groundShadow} aria-hidden="true" />
       {/* 工具状态气泡：双层结构（主行状态短语 + 副行状态徽标），状态着色，
           随状态轮询更新；互动反馈气泡（feedback）优先级更高。 */}
-      {feedback === null && snapshot?.bubble !== undefined && snapshot.bubble !== null && snapshot.bubble !== '' && (
+      {feedback === null && !transientHidden && snapshot?.bubble !== undefined && snapshot.bubble !== null && snapshot.bubble !== '' && (
         <div
           key={'tool-' + snapshot.phase + '-' + snapshot.bubble}
           className={styles.bubble + ' ' + (styles[statusBubbleClass(snapshot.phase)] ?? styles.bubbleTool)}
@@ -360,7 +374,6 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
       {hovered && dragRef.current === null && (
         <div
           className={styles.panel}
-          style={{ bottom: 'calc(100% - ' + contentTopPx + 'px + 8px)' }}
           onPointerEnter={() => {
             // Reaching the panel (or its bridge) must cancel any hide timer
             // the container's pointerleave may have armed while the pointer
