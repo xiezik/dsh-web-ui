@@ -44,8 +44,9 @@ export type {
 export {
   animationForPhase,
   PetStateMachine,
-  rowOf,
 } from './state.ts'
+export { PET_SKINS, skinOf } from './skins.ts'
+export type { PetSkinDef, PetSkinId, SkinRowMap, SkinTrackDef } from './skins.ts'
 export type {
   ActivityPhase,
   PetAnimation,

@@ -1,0 +1,24 @@
+{
+  "id": "aemeath-bust",
+  "displayName": "爱弥斯·半身像素",
+  "description": "半身像素特写版爱弥斯（A3 工作特写行 + A1 screen 表情），dsh-pet 可选皮肤。",
+  "spritesheetPath": "spritesheet.webp",
+  "frames": [
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    6,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8
+  ]
+}

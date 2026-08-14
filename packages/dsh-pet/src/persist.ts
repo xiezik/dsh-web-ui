@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { AFFINITY_MAX, emptyAffinity, type AffinityState } from './affinity.ts'
 import { defaultTreatConfig, emptyTreatLedger, type TreatLedger } from './treats.ts'
+import type { PetSkinId } from './skins.ts'
 
 /** Display configuration the user can tweak. */
 export interface PetDisplayConfig {
@@ -39,6 +40,8 @@ export const DISPLAY_INSET_MAX = 10_000
 export interface PetPersist {
   /** User-customizable pet display name. */
   name: string
+  /** Which pet skin is selected (whale default; aemeath-bust etc.). */
+  skin: PetSkinId
   affinity: AffinityState
   /** Treat (小鱼干) stock ledger. */
   treats: TreatLedger
@@ -54,6 +57,7 @@ export const PET_NAME_MAX_LENGTH = 20
 export function emptyPersist(): PetPersist {
   return {
     name: DEFAULT_PET_NAME,
+    skin: 'whale',
     affinity: emptyAffinity(),
     treats: emptyTreatLedger(),
     display: { ...defaultDisplayConfig },
@@ -109,6 +113,9 @@ export function loadPetPersist(dir: string = petHomeDir()): PetPersist {
       name: typeof parsed.name === 'string' && parsed.name.trim() !== ''
         ? parsed.name
         : base.name,
+      skin: (parsed.skin === 'whale' || parsed.skin === 'aemeath-bust')
+        ? parsed.skin
+        : base.skin,
       affinity,
       treats,
       display,

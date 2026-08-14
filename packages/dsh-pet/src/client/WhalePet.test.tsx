@@ -27,6 +27,7 @@ const snapshot: PetStateView = {
   },
   display: { visible: true, size: 160, right: 24, bottom: 20 },
   name: '泡泡',
+  skin: 'whale',
   treats: { stocked: 3, max: 5 },
 }
 

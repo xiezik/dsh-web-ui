@@ -75,7 +75,7 @@ describe('PetService (rc.6 session events)', () => {
     }
   })
 
-  it('clears the pose on an aborted turn without counting it as completed', async () => {
+  it('shows the failed pose on an aborted turn without counting it as completed', async () => {
     const ctx = new Context()
     const dir = tempDir()
     try {
@@ -83,7 +83,9 @@ describe('PetService (rc.6 session events)', () => {
       ctx.emit('session/event', ...toolCall('s1', 'grep', 1))
       ctx.emit('session/event', ...turnEnd('s1', 1, { kind: 'aborted', reason: { kind: 'user' } }, 2))
       const view = await service.state()
-      expect(view.animation).toBe('idle')
+      // Aborted / failed turns now light up the failed pose instead of
+      // freezing on the last phase (enhancement; previously idle).
+      expect(view.animation).toBe('failed')
       expect(view.affinity.turns).toBe(0)
       expect(view.treats.stocked).toBe(0)
     } finally {

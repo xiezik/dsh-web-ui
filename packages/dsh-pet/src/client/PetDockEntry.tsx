@@ -35,6 +35,8 @@ export interface PetInjected {
   dragEnd: (right: number, bottom: number) => void
   /** Rename the pet (persisted by the host). */
   rename: (name: string) => void
+  /** Switch the pet skin (persisted by the host). */
+  setSkin: (skinId: string) => void
   /** Clear the reaction bubble. */
   feedbackDone: () => void
 }

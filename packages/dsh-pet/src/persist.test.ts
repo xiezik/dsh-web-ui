@@ -44,6 +44,7 @@ describe('loadPetPersist', () => {
     try {
       const data = {
         name: '泡泡',
+        skin: 'aemeath-bust' as const,
         affinity: { ...emptyAffinity(), points: 42, pets: 3, feeds: 1, turns: 10 },
         treats: { ...emptyTreatLedger(), treats: 7, lastTreatGrantAt: 1234, turnsAtLastTreatGrant: 9 },
         display: { visible: false, size: 200, right: 10, bottom: 40 },

@@ -3,9 +3,9 @@ import {
   animationForPhase,
   defaultPetStateConfig,
   PetStateMachine,
-  rowOf,
   type PetAnimation,
 } from './state.ts'
+import { whaleSkin, aemeathBustSkin } from './skins.ts'
 
 describe('animationForPhase', () => {
   it('maps each activity phase onto the animation contract', () => {
@@ -13,6 +13,12 @@ describe('animationForPhase', () => {
     expect(animationForPhase('tool')).toBe('running-right')
     expect(animationForPhase('waiting')).toBe('waiting')
     expect(animationForPhase('done')).toBe('jumping')
+    expect(animationForPhase('failed')).toBe('failed')
+    expect(animationForPhase('fetching')).toBe('fetching')
+    expect(animationForPhase('searching')).toBe('searching')
+    expect(animationForPhase('analyzing')).toBe('analyzing')
+    expect(animationForPhase('building')).toBe('building')
+    expect(animationForPhase('chatting')).toBe('chatting')
     expect(animationForPhase('idle')).toBe('idle')
   })
 })
@@ -50,16 +56,37 @@ describe('PetStateMachine', () => {
     expect(s.animation).toBe('idle')
     expect(s.phase).toBe('idle')
   })
+})
 
-  it('keeps every animation on a known spritesheet row', () => {
+describe('skins', () => {
+  it('maps every animation onto a known row in the whale skin (Codex 9 rows)', () => {
     const animations: readonly PetAnimation[] = [
       'idle', 'running-right', 'running-left', 'waving', 'jumping',
       'failed', 'waiting', 'running', 'review',
+      'fetching', 'searching', 'analyzing', 'building', 'chatting',
     ]
     for (const animation of animations) {
-      const row = rowOf(animation)
+      const row = whaleSkin.rows[animation]
       expect(row).toBeGreaterThanOrEqual(0)
-      expect(row).toBeLessThanOrEqual(8)
+      expect(row).toBeLessThan(whaleSkin.rowCount)
     }
+    // Tool-specific tracks fall back to the generic running row (7).
+    expect(whaleSkin.rows.fetching).toBe(7)
+  })
+
+  it('maps every animation onto the aemeath-bust rows (0-13)', () => {
+    const animations: readonly PetAnimation[] = [
+      'idle', 'running-right', 'running-left', 'waving', 'jumping',
+      'failed', 'waiting', 'running', 'review',
+      'fetching', 'searching', 'analyzing', 'building', 'chatting',
+    ]
+    for (const animation of animations) {
+      const row = aemeathBustSkin.rows[animation]
+      expect(row).toBeGreaterThanOrEqual(0)
+      expect(row).toBeLessThan(aemeathBustSkin.rowCount)
+    }
+    // Tool-specific tracks have their own rows.
+    expect(aemeathBustSkin.rows.fetching).toBe(9)
+    expect(aemeathBustSkin.rows.building).toBe(12)
   })
 })

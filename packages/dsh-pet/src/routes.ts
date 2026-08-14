@@ -1,9 +1,9 @@
 /**
  * Pet HTTP routes — the browser half talks to the host through plain
- * same-origin JSON endpoints (`/api/pet/*`) and loads the whale-girl atlas
- * from `/pet/whale/*`. The `/plugins/` endpoint only serves client bundles
- * and RPC domains are platform-registered, so the pet serves its own API
- * and media — the same pattern as dsh-remote-web-ui's `/api/pair` family.
+ * same-origin JSON endpoints (/api/pet/*) and loads the selected skin's
+ * atlas from /pet/<skin>/*. The /plugins/ endpoint only serves client
+ * bundles and RPC domains are platform-registered, so the pet serves its own
+ * API and media — the same pattern as dsh-remote-web-ui's /api/pair family.
  * @module @linxin666/dsh-pet/routes
  */
 
@@ -18,14 +18,17 @@ import type { PetInteraction } from './affinity.ts'
 /** Browser-facing base path of the pet API. */
 export const PET_API_PREFIX = '/api/pet'
 
-/** Browser-facing base path of the pet asset routes. */
-export const PET_ASSET_PREFIX = '/pet/whale'
+/** Browser-facing base path of the pet asset routes (per-skin). */
+export const PET_ASSET_PREFIX = '/pet'
 
 /** Relative (to package root) asset files exposed under the prefix. */
 const ASSET_FILES = [
   { name: 'spritesheet.webp', mime: 'image/webp' },
   { name: 'pet.json', mime: 'application/json' },
 ] as const
+
+/** Per-skin asset directories served under /pet/<dir>/*. */
+const SKIN_ASSET_DIRS = ['whale', 'aemeath-bust'] as const
 
 /** Absolute package root, resolved from this module's own location (lib/). */
 export function petPackageRoot(importMetaUrl: string): string {
@@ -53,8 +56,6 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > 64 * 1024) {
-        // Reject first so the error handler can write the 400 response,
-        // then close the connection once the response is flushed.
         reject(new Error('body-too-large'))
         queueMicrotask(() => req.destroy())
         return
@@ -138,34 +139,41 @@ export function makePetRoutes(deps: { service: PetService; packageRoot: string }
       if (typeof name !== 'string') return Promise.reject(new Error('invalid-name'))
       return service.setName(name)
     }),
+    postRoute(`${PET_API_PREFIX}/set-skin`, (body) => {
+      const skinId = body.skin
+      if (typeof skinId !== 'string') return Promise.reject(new Error('invalid-skin'))
+      return service.setSkin(skinId)
+    }),
   ]
 
-  const assetRoutes: WebRoute[] = ASSET_FILES.map((file): WebRoute => ({
-    kind: 'exact',
-    path: `${PET_ASSET_PREFIX}/${file.name}`,
-    handler: (req: IncomingMessage, res: ServerResponse): Promise<void> | void => {
-      if (req.method !== 'GET' && req.method !== 'HEAD') {
-        res.writeHead(405)
-        res.end()
-        return
-      }
-      return readFile(join(packageRoot, 'assets', 'whale', file.name)).then((body) => {
-        res.writeHead(200, {
-          'content-type': file.mime,
-          'content-length': String(body.byteLength),
-          'cache-control': 'no-cache',
-        })
-        if (req.method === 'HEAD') {
+  const assetRoutes: WebRoute[] = SKIN_ASSET_DIRS.flatMap((dir) =>
+    ASSET_FILES.map((file): WebRoute => ({
+      kind: 'exact',
+      path: `${PET_ASSET_PREFIX}/${dir}/${file.name}`,
+      handler: (req: IncomingMessage, res: ServerResponse): Promise<void> | void => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.writeHead(405)
           res.end()
           return
         }
-        res.end(body)
-      }, () => {
-        res.writeHead(404)
-        res.end()
-      })
-    },
-  }))
+        return readFile(join(packageRoot, 'assets', dir, file.name)).then((body) => {
+          res.writeHead(200, {
+            'content-type': file.mime,
+            'content-length': String(body.byteLength),
+            'cache-control': 'no-cache',
+          })
+          if (req.method === 'HEAD') {
+            res.end()
+            return
+          }
+          res.end(body)
+        }, () => {
+          res.writeHead(404)
+          res.end()
+        })
+      },
+    })),
+  )
 
   return [...apiRoutes, ...assetRoutes]
 }

@@ -14,8 +14,9 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PetDisplayConfig } from '../persist.ts'
 import type { PetStateView } from '../service.ts'
 import type { PetFeedback } from './pet-store.ts'
-import { framePosition, FRAME_WIDTH, FRAME_HEIGHT, FRAME_COLUMNS, TRACKS, rowOfTrack, trimTrack, detectFrameCounts } from './spritesheet.ts'
+import { framePosition, FRAME_WIDTH, FRAME_HEIGHT, FRAME_COLUMNS, TRACKS, rowOfTrackFor, trimTrack, detectFrameCounts } from './spritesheet.ts'
 import type { PetAnimation } from '../state.ts'
+import { skinOf, type PetSkinDef } from '../skins.ts'
 import { NS } from './locales.ts'
 import styles from './pet.module.css'
 
@@ -24,6 +25,15 @@ export const PET_SPRITESHEET_URL = '/pet/whale/spritesheet.webp'
 
 /** Browser URL of the whale-girl manifest (authoritative per-row frame counts). */
 export const PET_MANIFEST_URL = '/pet/whale/pet.json'
+
+/** Per-skin asset URLs (the client loads whichever skin the host reports). */
+export function petAssetUrls(skinId: string): { spritesheet: string; manifest: string } {
+  const skin = skinOf(skinId)
+  return {
+    spritesheet: `/pet/${skin.assetDir}/spritesheet.webp`,
+    manifest: `/pet/${skin.assetDir}/pet.json`,
+  }
+}
 
 /** Props injected by the slot registration (store actions + locale). */
 export interface WhalePetProps {
@@ -78,39 +88,49 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
     elapsed: 0,
   })
 
-  // Load the atlas once; then resolve per-row frame counts so tracks never
-  // play the transparent trailing cells of a short row. One decoded Image
-  // feeds both the sprite render and the frame-count detection. The counts
-  // prefer the authoritatively recorded `frames` field on the pet.json
-  // manifest route and only fall back to the getImageData atlas scan when
-  // that field is absent (older manifests).
+  // The currently selected skin (from the host snapshot) drives which atlas
+  // and tracks are used. Loading happens per-skin: switching skin reloads the
+  // atlas and re-detects per-row frame counts.
+  const skinId = snapshot?.skin ?? 'whale'
+  const skin: PetSkinDef = skinOf(skinId)
+  const urls = petAssetUrls(skinId)
+
+  // Load the atlas for the current skin; then resolve per-row frame counts so
+  // tracks never play the transparent trailing cells of a short row. One
+  // decoded Image feeds both the sprite render and the frame-count detection.
+  // The counts prefer the authoritatively recorded `frames` field on the
+  // pet.json manifest route and only fall back to the getImageData atlas scan
+  // when that field is absent (older manifests).
   useEffect(() => {
     let cancelled = false
+    setImageReady(false)
+    setFrameCounts(null)
     const img = new Image()
     img.onload = () => {
       if (cancelled) return
       setImageReady(true)
-      fetch(PET_MANIFEST_URL)
+      fetch(urls.manifest)
         .then((res) => (res.ok ? res.json() : Promise.resolve<{ frames?: unknown }>({})))
         .then((manifest: { frames?: unknown }) => {
           if (cancelled) return
           const frames = manifest.frames
-          if (Array.isArray(frames) && frames.length === 9 && frames.every((n) => typeof n === 'number')) {
+          if (Array.isArray(frames) && frames.length === skin.rowCount && frames.every((n) => typeof n === 'number')) {
             setFrameCounts(frames as number[])
           } else {
-            setFrameCounts(detectFrameCounts(img))
+            setFrameCounts(detectFrameCounts(img, skin.rowCount))
           }
         })
         .catch(() => {
-          if (!cancelled) setFrameCounts(detectFrameCounts(img))
+          if (!cancelled) setFrameCounts(detectFrameCounts(img, skin.rowCount))
         })
     }
-    img.src = PET_SPRITESHEET_URL
+    img.src = urls.spritesheet
     return () => {
       cancelled = true
       img.onload = null
     }
-  }, [])
+    // Reload whenever the skin changes (or on first mount).
+  }, [urls.spritesheet, urls.manifest, skin.rowCount])
 
   // Frame loop: advance the current track and write background-position.
   // Offsets must be in SCALED coordinates (background-position applies to the
@@ -122,15 +142,18 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
   const animation = snapshot?.animation ?? 'idle'
   const scaleRef = useRef(spriteScale)
   scaleRef.current = spriteScale
+  // Tracks come from the skin definition (whale keeps the original timings;
+  // aemeath-bust uses its own). The row for an animation is the skin's row map.
+  const skinTracks = skin.tracks
   useEffect(() => {
     const reduceMotion = typeof window !== 'undefined'
       && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true
     // Paint one static sprite frame up front either way, so the pet is never
     // blank while the loop heat-up runs.
-    const row = rowOfTrack(animation)
+    const row = rowOfTrackFor(animation, skin)
     const track = frameCounts === null
-      ? TRACKS[animation]
-      : trimTrack(TRACKS[animation], frameCounts[row] ?? TRACKS[animation].frames.length)
+      ? skinTracks[animation]
+      : trimTrack(skinTracks[animation], frameCounts[row] ?? skinTracks[animation].frames.length)
     const leadCol = track.frames[0]!
     const lead = framePosition(row, leadCol, scaleRef.current)
     if (spriteRef.current !== null) {
@@ -144,10 +167,10 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
       last = ts
       // Trim the track to the row's real frame count (transparent cells
       // would render as a vanishing pet).
-      const row = rowOfTrack(animation)
+      const row = rowOfTrackFor(animation, skin)
       const track = frameCounts === null
-        ? TRACKS[animation]
-        : trimTrack(TRACKS[animation], frameCounts[row] ?? TRACKS[animation].frames.length)
+        ? skinTracks[animation]
+        : trimTrack(skinTracks[animation], frameCounts[row] ?? skinTracks[animation].frames.length)
       const st = frameRef.current
       if (st.track !== animation) {
         st.track = animation
@@ -177,7 +200,7 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [animation, frameCounts])
+  }, [animation, frameCounts, skin])
 
   // Auto-clear the feedback bubble after its CSS animation. The callback
   // rides a ref so re-renders never reset the timer: the 800ms poll rebuilds
@@ -258,8 +281,8 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
         style={{
           width: spriteWidth,
           height: spriteHeight,
-          backgroundImage: imageReady ? `url(${PET_SPRITESHEET_URL})` : undefined,
-          backgroundSize: `${FRAME_WIDTH * FRAME_COLUMNS * spriteScale}px ${FRAME_HEIGHT * 9 * spriteScale}px`,
+          backgroundImage: imageReady ? `url(${urls.spritesheet})` : undefined,
+          backgroundSize: `${FRAME_WIDTH * FRAME_COLUMNS * spriteScale}px ${FRAME_HEIGHT * skin.rowCount * spriteScale}px`,
           backgroundRepeat: 'no-repeat',
           backgroundPosition: '0 0',
           cursor: dragRef.current === null ? 'grab' : 'grabbing',

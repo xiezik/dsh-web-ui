@@ -235,3 +235,47 @@ export function BooleanField(props: FieldProps & {
     </div>
   )
 }
+
+/** A staged choice field: 继承 / one of several options. */
+export function ChoiceField(props: FieldProps & {
+  /** Copy for the inherit option. */
+  inheritLabel: string
+  /** Selectable options (value + label). */
+  options: { value: string; label: string }[]
+}) {
+  return (
+    <div className={css.field}>
+      <div className={css.head}>
+        <label className={css.label} htmlFor={props.id}>{props.label}</label>
+        {props.overridden
+          ? (
+            <span className={css.badges}>
+              <span className={css.badge}>{props.overriddenLabel}</span>
+              <button
+                type="button"
+                className={css.reset}
+                disabled={props.disabled}
+                onClick={props.onReset}
+              >
+                {props.resetLabel}
+              </button>
+            </span>
+          )
+          : null}
+      </div>
+      <select
+        id={props.id}
+        className={css.select}
+        value={props.text}
+        disabled={props.disabled}
+        onChange={(event) => { props.onEdit(event.target.value) }}
+      >
+        <option value="">{props.inheritLabel}</option>
+        {props.options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+      <p className={css.hint}>{props.hint}</p>
+    </div>
+  )
+}

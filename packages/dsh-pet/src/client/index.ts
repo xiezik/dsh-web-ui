@@ -25,40 +25,8 @@ import { createRoot } from 'react-dom/client'
 import { createPetStore, type PetStoreInstance } from './pet-store.ts'
 import { PetDockEntry, type PetInjected } from './PetDockEntry.tsx'
 import { PetSettingsCard, PetSettingsCardController, type PetSettings } from './PetSettingsCard.tsx'
+import { petApi } from './pet-api.ts'
 import { NS, en, zh, t } from './locales.ts'
-
-/** The host pet API as the browser sees it (same-origin JSON endpoints). */
-interface PetHttpApi {
-  state(): Promise<PetStateView>
-  interact(kind: PetInteraction): Promise<PetInteractResult>
-  setVisible(visible: boolean): Promise<{ ok: true; display: PetDisplayConfig }>
-  setConfig(patch: Partial<PetDisplayConfig>): Promise<{ ok: true; display: PetDisplayConfig }>
-  setName(name: string): Promise<{ ok: true; name: string } | { ok: false; error: string }>
-}
-
-/** Same-origin JSON fetch helper (GET without body, POST with JSON body). */
-async function petFetch<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(path, body === undefined
-    ? {}
-    : {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-  if (!response.ok) {
-    throw new Error(`pet ${path} failed: ${response.status}`)
-  }
-  return (await response.json()) as T
-}
-
-/** The live host API instance (always defined; failures surface per call). */
-const petApi: PetHttpApi = {
-  state: () => petFetch('/api/pet/state'),
-  interact: (kind) => petFetch('/api/pet/interact', { kind }),
-  setVisible: (visible) => petFetch('/api/pet/set-visible', { visible }),
-  setConfig: (patch) => petFetch('/api/pet/set-config', patch),
-  setName: (name) => petFetch('/api/pet/set-name', { name }),
-}
 
 /** Poll interval for the host snapshot. */
 const POLL_MS = 800
@@ -238,6 +206,13 @@ export function apply(ctx: ClientContext): void {
         },
         rename: (name) => {
           petApi.setName(name).then((result) => {
+            if (result.ok) pollNow()
+          }, () => {
+            // Ignore; next poll resyncs.
+          })
+        },
+        setSkin: (skinId) => {
+          petApi.setSkin(skinId).then((result) => {
             if (result.ok) pollNow()
           }, () => {
             // Ignore; next poll resyncs.

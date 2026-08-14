@@ -41,7 +41,9 @@ import {
   PetStateMachine,
   type PetStateConfig,
   type PetStateSnapshot,
+  type ActivityPhase,
 } from './state.ts'
+import { PET_SKINS, skinOf, type PetSkinId } from './skins.ts'
 
 /** Plugin configuration. */
 export interface PetConfig {
@@ -103,6 +105,8 @@ export interface PetStateView {
   display: PetDisplayConfig
   /** User-customizable pet display name. */
   name: string
+  /** Currently selected pet skin (drives which atlas/tracks the client loads). */
+  skin: PetSkinId
   /** Treat (小鱼干) stock snapshot. */
   treats: {
     /** Stocked treats now. */
@@ -120,6 +124,82 @@ export interface PetInteractResult {
   delta: number
   /** Full affinity snapshot (same shape as state view). */
   affinity: PetStateView['affinity']
+}
+
+/**
+ * Map a tool name onto a pet phase. Tools with a dedicated bust track get
+ * their own phase; everything else falls back to the generic `tool` phase
+ * (running-right animation).
+ */
+export function toolPhase(name: string): ActivityPhase {
+  switch (name) {
+    case 'webfetch':
+    case 'fetch':
+    case 'http':
+      return 'fetching'
+    case 'websearch':
+    case 'search':
+      return 'searching'
+    case 'edit':
+    case 'write':
+    case 'apply_patch':
+    case 'patch':
+    case 'bash':
+      return 'building'
+    case 'agent':
+    case 'task':
+    case 'plan':
+      return 'analyzing'
+    case 'chat':
+    case 'ask':
+      return 'chatting'
+    default:
+      return 'tool'
+  }
+}
+
+/** Max length of the tool-argument summary shown in the pet bubble. */
+export const ARG_SUMMARY_MAX = 24
+
+/**
+ * Build a safe, short human summary from a tool call's raw arguments JSON.
+ * Only the FIRST scalar-ish field (command / filePath / search terms) is
+ * surfaced, truncated to ARG_SUMMARY_MAX chars; full arguments never leave
+ * the host. Mirrors the pet-bridge safety boundary.
+ */
+export function summarizeArguments(rawArguments: string, toolName: string): string | undefined {
+  if (toolName === 'bash') {
+    // bash: {"command": "..."} → the command itself
+    try {
+      const parsed = JSON.parse(rawArguments) as Record<string, unknown>
+      const cmd = typeof parsed.command === 'string' ? parsed.command : undefined
+      if (cmd !== undefined && cmd.trim() !== '') return cmd.trim()
+    } catch { /* fall through */ }
+    return undefined
+  }
+  try {
+    const parsed = JSON.parse(rawArguments) as Record<string, unknown>
+    // Prefer common summary fields, else the first string value.
+    const preferred = ['filePath', 'path', 'file', 'query', 'search', 'url', 'prompt', 'text']
+    for (const key of preferred) {
+      const value = parsed[key]
+      if (typeof value === 'string' && value.trim() !== '') return value.trim()
+    }
+    for (const value of Object.values(parsed)) {
+      if (typeof value === 'string' && value.trim() !== '') return value.trim()
+      if (Array.isArray(value)) {
+        const first = value.find((v): v is string => typeof v === 'string' && v.trim() !== '')
+        if (first !== undefined) return first.trim()
+      }
+    }
+  } catch { /* not JSON → fall through */ }
+  return undefined
+}
+
+/** Truncate a summary to ARG_SUMMARY_MAX chars, appending an ellipsis. */
+export function clipSummary(summary: string): string {
+  if (summary.length <= ARG_SUMMARY_MAX) return summary
+  return summary.slice(0, ARG_SUMMARY_MAX - 1) + '…'
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -182,6 +262,11 @@ export class PetService extends Service {
     return this.persist.name
   }
 
+  /** Current persisted pet skin id (read-only view). */
+  petSkin(): PetSkinId {
+    return this.persist.skin
+  }
+
   /** Start or stop the session-activity listeners that drive the pet. */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled
@@ -208,19 +293,30 @@ export class PetService extends Service {
               this.machine.onSessionActive()
               this.machine.onActivityStatus({ phase: 'thinking' })
               break
-            case 'tool/call':
+            case 'tool/call': {
               this.machine.onSessionActive()
-              this.machine.onActivityStatus({ phase: 'tool', line: 'tool: ' + event.data.name })
+              const name = event.data.name
+              // Tool-specific phase (fetching/searching/analyzing/building/
+              // chatting) so skins with dedicated rows play the right track.
+              const phase = toolPhase(name)
+              // Safe argument summary (≤ ARG_SUMMARY_MAX chars; full args
+              // never leave the host).
+              const summary = summarizeArguments(event.data.arguments, name)
+              const line = summary !== undefined
+                ? name + ' · ' + clipSummary(summary)
+                : 'tool: ' + name
+              this.machine.onActivityStatus({ phase, line })
               break
+            }
             case 'turn/end':
               this.machine.onSessionActive()
               if (event.data.reason.kind === 'completed') {
                 this.machine.onActivityStatus({ phase: 'done' })
                 this.rewardTurn(String(session.id), event.data.turn)
               } else {
-                // Aborted / failed turns clear the working pose instead of
+                // Aborted / failed turns show the failed pose instead of
                 // freezing the pet on its last phase.
-                this.machine.onActivityStatus({ phase: 'idle' })
+                this.machine.onActivityStatus({ phase: 'failed', line: '未完成' })
               }
               break
             default:
@@ -314,6 +410,19 @@ export class PetService extends Service {
     this.flush()
   }
 
+  /** RPC: switch the pet skin (persisted; the client reloads the atlas on the next state poll). */
+  async setSkin(skinId: string): Promise<{ ok: true; skin: PetSkinId } | { ok: false; error: string }> {
+    const skin = skinOf(skinId)
+    if (skin.id !== this.persist.skin) {
+      // Keep the previous skin's default name if the user never renamed.
+      const prevDefault = PET_SKINS[this.persist.skin]?.defaultName
+      const name = this.persist.name === prevDefault ? skin.defaultName : this.persist.name
+      this.persist = { ...this.persist, skin: skin.id, name }
+      this.flush()
+    }
+    return { ok: true, skin: this.persist.skin }
+  }
+
   /** Mirror the persisted display config into the settings document (best-effort). */
   private syncSettingsFromPet(): void {
     const settings = this.ctx.get('settings', false) as { update(ns: string, patch: object): Promise<void> } | undefined
@@ -369,6 +478,7 @@ export class PetService extends Service {
       affinity: this.affinityView(this.persist.affinity),
       display: { ...this.persist.display },
       name: this.persist.name,
+      skin: this.persist.skin,
       treats: {
         stocked: this.persist.treats.treats,
         max: this.treatConfig.maxTreats,

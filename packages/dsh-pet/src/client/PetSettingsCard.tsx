@@ -2,12 +2,17 @@
  * The pet settings card: display layout and name, bound to the `pet` settings
  * namespace the host plugin registers. Registered into the
  * `settings.plugin.item` slot the plugin-configuration section renders.
+ * The pet SKIN switch is NOT part of the settings namespace (its schema is
+ * composed by the host and cannot carry extra optional fields): it is a
+ * live action that calls the /api/pet/set-skin RPC immediately.
  */
 
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScope, SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { PluginSettingsCard, ValueField, BooleanField } from './PluginSettingsCard.tsx'
 import { CardForm, booleanField, numberField, textField, type CardActions, type CardShell, type FieldState as CardFieldState } from './settings-form.ts'
+import { PET_SKINS, type PetSkinId } from '../skins.ts'
+import { petApi } from './pet-api.ts'
 
 /** The pet's settings fields this card edits (the namespace's full schema). */
 export interface PetSettings {
@@ -43,6 +48,8 @@ export interface PetSettingsCardState extends CardShell {
 
 /** The registration-side face the card's slot entry injects. */
 export interface PetSettingsCardFace extends CardActions {
+  /** Switch the pet skin immediately (persisted by the host; not staged). */
+  setSkin: (skinId: string) => void
   hooks: {
     /** Card snapshot bound by the renderer as usePetSettingsCard. */
     petSettingsCard: SnapshotStore<PetSettingsCardState>
@@ -84,7 +91,11 @@ export class PetSettingsCardController {
    * @returns the card's snapshot and its form actions.
    */
   inject(): PetSettingsCardFace {
-    return { hooks: { petSettingsCard: this.store }, ...this.form.actions() }
+    return {
+      hooks: { petSettingsCard: this.store },
+      setSkin: (skinId) => { void petApi.setSkin(skinId) },
+      ...this.form.actions(),
+    }
   }
 }
 
@@ -181,6 +192,25 @@ export function PetSettingsCard(props: PetSettingsCardProps) {
         onEdit={(text) => { props.edit('name', text) }}
         onReset={() => { props.resetField('name') }}
       />
+      <div className="pet-skin-picker">
+        <div className="pet-skin-picker-head">
+          <span className="pet-skin-picker-label">{t('settings.skin')}</span>
+        </div>
+        <div className="pet-skin-picker-options">
+          {Object.values(PET_SKINS).map((skin) => (
+            <button
+              key={skin.id}
+              type="button"
+              className="pet-skin-picker-option"
+              disabled={disabled}
+              onClick={() => { props.setSkin(skin.id as PetSkinId) }}
+            >
+              {skin.displayName}
+            </button>
+          ))}
+        </div>
+        <p className="pet-skin-picker-hint">{t('settings.skinHint')}</p>
+      </div>
     </PluginSettingsCard>
   )
 }
