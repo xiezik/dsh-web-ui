@@ -291,7 +291,7 @@ export class PetService extends Service {
               break
             case 'step/start':
               this.machine.onSessionActive()
-              this.machine.onActivityStatus({ phase: 'thinking' })
+              this.machine.onActivityStatus({ phase: 'thinking', line: '思考中…' })
               break
             case 'tool/call': {
               this.machine.onSessionActive()
@@ -311,7 +311,7 @@ export class PetService extends Service {
             case 'turn/end':
               this.machine.onSessionActive()
               if (event.data.reason.kind === 'completed') {
-                this.machine.onActivityStatus({ phase: 'done' })
+                this.machine.onActivityStatus({ phase: 'done', line: '完成！' })
                 this.rewardTurn(String(session.id), event.data.turn)
               } else {
                 // Aborted / failed turns show the failed pose instead of

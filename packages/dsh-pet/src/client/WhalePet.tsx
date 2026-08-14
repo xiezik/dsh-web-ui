@@ -76,6 +76,7 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
   const floatRef = useRef<HTMLDivElement | null>(null)
   const [imageReady, setImageReady] = useState(false)
   const [frameCounts, setFrameCounts] = useState<number[] | null>(null)
+  const [layoutByRow, setLayoutByRow] = useState<number[] | null>(null)
   const [hovered, setHovered] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
@@ -105,19 +106,26 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
     let cancelled = false
     setImageReady(false)
     setFrameCounts(null)
+    setLayoutByRow(null)
     const img = new Image()
     img.onload = () => {
       if (cancelled) return
       setImageReady(true)
       fetch(urls.manifest)
-        .then((res) => (res.ok ? res.json() : Promise.resolve<{ frames?: unknown }>({})))
-        .then((manifest: { frames?: unknown }) => {
+        .then((res) => (res.ok ? res.json() : Promise.resolve<{ frames?: unknown; layoutByRow?: unknown }>({})))
+        .then((manifest: { frames?: unknown; layoutByRow?: unknown }) => {
           if (cancelled) return
           const frames = manifest.frames
           if (Array.isArray(frames) && frames.length === skin.rowCount && frames.every((n) => typeof n === 'number')) {
             setFrameCounts(frames as number[])
           } else {
             setFrameCounts(detectFrameCounts(img, skin.rowCount))
+          }
+          // Content-top ratio per row (bubble/panel anchor). Absent on older
+          // manifests → content assumed to start at the cell top (legacy).
+          const layout = manifest.layoutByRow
+          if (Array.isArray(layout) && layout.length >= skin.rowCount && layout.every((n) => typeof n === 'number')) {
+            setLayoutByRow(layout as number[])
           }
         })
         .catch(() => {
@@ -251,6 +259,12 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
   const pos = dragPos ?? { right: display.right, bottom: display.bottom }
   const spriteWidth = Math.round(FRAME_WIDTH * spriteScale)
   const spriteHeight = Math.round(FRAME_HEIGHT * spriteScale)
+  // Content-aware overlay anchor: bubble/panel sit on the CONTENT top, not the
+  // cell top. Bust rows start low inside the cell, so anchoring to the cell
+  // top would leave a large empty gap between the pet and its bubble.
+  const activeRow = rowOfTrackFor(animation, skin)
+  const contentTopRatio = layoutByRow !== null ? (layoutByRow[activeRow] ?? 0) : 0
+  const contentTopPx = Math.round(contentTopRatio * spriteHeight)
 
   const float = (
     <div
@@ -299,14 +313,30 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
         role="button"
         aria-label="whale girl"
       />
+      {/* 工具状态气泡：host 生成的 line/phrase（如 "bash · 运行 pwd"），
+          随状态轮询更新；互动反馈气泡（feedback）优先级更高。 */}
+      {feedback === null && snapshot?.bubble !== undefined && snapshot.bubble !== null && snapshot.bubble !== '' && (
+        <div
+          key={'tool-' + snapshot.phase + '-' + snapshot.bubble}
+          className={styles.bubble + ' ' + styles.bubbleTool}
+          style={{ bottom: 'calc(100% - ' + contentTopPx + 'px + 6px)' }}
+        >
+          {snapshot.bubble}
+        </div>
+      )}
       {feedback !== null && (
-        <div key={feedback.at} className={`${styles.bubble} ${feedback.kind === 'feed' ? styles.bubbleFeed : styles.bubblePet}`}>
+        <div
+          key={feedback.at}
+          className={styles.bubble + ' ' + (feedback.kind === 'feed' ? styles.bubbleFeed : styles.bubblePet)}
+          style={{ bottom: 'calc(100% - ' + contentTopPx + 'px + 6px)' }}
+        >
           {feedback.text}
         </div>
       )}
       {hovered && dragRef.current === null && (
         <div
           className={styles.panel}
+          style={{ bottom: 'calc(100% - ' + contentTopPx + 'px + 8px)' }}
           onPointerEnter={() => {
             // Reaching the panel (or its bridge) must cancel any hide timer
             // the container's pointerleave may have armed while the pointer
