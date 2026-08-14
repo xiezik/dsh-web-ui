@@ -19,6 +19,11 @@ export const zh = {
   'pet.treats': '小鱼干 ×{n}',
   'pet.state.loading': '鲸鱼娘正在赶来…',
   'pet.state.error': '鲸鱼娘迷路了（连接失败）',
+  'pet.sub.thinking': '思考中',
+  'pet.sub.tool': '工具调用',
+  'pet.sub.done': '完成',
+  'pet.sub.failed': '中断',
+  'pet.sub.idle': '待机',
   // 插件设置卡片（settings.plugin.item 席位）。
   'settings.title': '宠物',
   'settings.description': '鲸鱼娘的显示布局与名字。',
@@ -66,6 +71,11 @@ export const en = {
   'pet.treats': 'Treats ×{n}',
   'pet.state.loading': 'The whale girl is on her way…',
   'pet.state.error': 'The whale girl is lost (connection failed)',
+  'pet.sub.thinking': 'Thinking',
+  'pet.sub.tool': 'Tool call',
+  'pet.sub.done': 'Done',
+  'pet.sub.failed': 'Interrupted',
+  'pet.sub.idle': 'Idle',
   // Plugin settings card (the `settings.plugin.item` seat).
   'settings.title': 'Pet',
   'settings.description': 'The whale girl\u2019s display layout and name.',

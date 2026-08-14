@@ -64,6 +64,27 @@ function clampOffset(value: number, max: number): number {
   return Math.max(0, Math.min(max, value))
 }
 
+/** Status bubble accent class per phase (state-colored bubble). */
+function statusBubbleClass(phase: string): 'bubbleThinking' | 'bubbleDone' | 'bubbleFailed' | 'bubbleTool' {
+  switch (phase) {
+    case 'thinking': return 'bubbleThinking'
+    case 'done': return 'bubbleDone'
+    case 'failed': return 'bubbleFailed'
+    default: return 'bubbleTool'
+  }
+}
+
+/** Sub-line label per phase (double-layer bubble footer). */
+function subLabel(phase: string): 'pet.sub.thinking' | 'pet.sub.done' | 'pet.sub.failed' | 'pet.sub.idle' | 'pet.sub.tool' {
+  switch (phase) {
+    case 'thinking': return 'pet.sub.thinking'
+    case 'done': return 'pet.sub.done'
+    case 'failed': return 'pet.sub.failed'
+    case 'idle': return 'pet.sub.idle'
+    default: return 'pet.sub.tool'
+  }
+}
+
 /**
  * The floating pet. The spritesheet frame advances on requestAnimationFrame
  * with per-frame durations from TRACKS; the atlas image is loaded once and
@@ -313,15 +334,18 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
         role="button"
         aria-label="whale girl"
       />
-      {/* 工具状态气泡：host 生成的 line/phrase（如 "bash · 运行 pwd"），
+      {/* 挂靠表现：底部地面投影（半身素材的“地面依托”） */}
+      <div className={styles.groundShadow} aria-hidden="true" />
+      {/* 工具状态气泡：双层结构（主行状态短语 + 副行状态徽标），状态着色，
           随状态轮询更新；互动反馈气泡（feedback）优先级更高。 */}
       {feedback === null && snapshot?.bubble !== undefined && snapshot.bubble !== null && snapshot.bubble !== '' && (
         <div
           key={'tool-' + snapshot.phase + '-' + snapshot.bubble}
-          className={styles.bubble + ' ' + styles.bubbleTool}
+          className={styles.bubble + ' ' + (styles[statusBubbleClass(snapshot.phase)] ?? styles.bubbleTool)}
           style={{ bottom: 'calc(100% - ' + contentTopPx + 'px + 6px)' }}
         >
-          {snapshot.bubble}
+          <span className={styles.bubbleMain}>{snapshot.bubble}</span>
+          <span className={styles.bubbleSub}>{props.t(subLabel(snapshot.phase))}</span>
         </div>
       )}
       {feedback !== null && (
