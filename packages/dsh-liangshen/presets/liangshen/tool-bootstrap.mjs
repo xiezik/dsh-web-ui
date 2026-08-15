@@ -4,7 +4,7 @@
  *
  * Phase 1 (no persisted `tool/call` yet):
  * - tool catalog: one platform shell plus `commonTools`
- * - prompt sections: only the `persona` section (all other sections,
+ * - prompt sections: only the persona section (all other sections,
  *   including plan-mode's `plan:policy`, return after promotion)
  * - runtime contexts: emptied (no sandbox/approval snapshot)
  * - pre-step messages: only explicit user messages pass
@@ -31,6 +31,26 @@ export const name = 'anchored-tool-bootstrap'
 
 /** Prompt assembly and the tool registry must exist before this filter runs. */
 export const inject = ['systemPrompt', 'tools']
+
+/**
+ * Prompt section names that carry the preset persona. The `dsh-persona` row
+ * registers the preset persona as `deployment:persona` (the PERSONA_SECTION
+ * name of `@deepseek-ai/dsh-system-prompt`), shadowing the deployment
+ * default for the preset scope; `persona` is the legacy name kept for older
+ * harnesses that registered the persona section without the prefix.
+ */
+const PERSONA_SECTION_NAMES = new Set(['deployment:persona', 'persona'])
+
+/**
+ * Workspace line a promoted persona gains. Phase 1 keeps the exact one-line
+ * persona (the Minimal anchor); after promotion the model must also know the
+ * session's selected workspace, which the Standard persona carries through
+ * the `{{cwd}}` prompt variable. The literal cwd is read from the session
+ * header at assembly time instead, so the line stays correct after a
+ * workspace switch and a session without a selected workspace keeps the bare
+ * one-liner rather than failing prompt interpolation.
+ */
+const WORKSPACE_LINE_PREFIX = '\n\nYour working directory is '
 
 /** Message-source kinds the model may see during phase 1. */
 const DEFAULT_MESSAGE_SOURCES = ['user']
@@ -200,6 +220,29 @@ function refresh(agent, policy) {
   return state
 }
 
+/**
+ * Append the session's working directory to the persona section of a promoted
+ * assembly. Returns the assembly unchanged when there is no persona section,
+ * no selected workspace, or the exact line is already present.
+ */
+function withWorkspaceLine(assembly, agent) {
+  const cwd = agent?.session?.header?.cwd
+  if (typeof cwd !== 'string' || cwd.length === 0) return assembly
+  if (!Array.isArray(assembly.sections)) return assembly
+  const line = `${WORKSPACE_LINE_PREFIX}${cwd}.`
+  const persona = assembly.sections.find(section =>
+    PERSONA_SECTION_NAMES.has(section?.name)
+    && typeof section?.text === 'string'
+    && !section.text.includes(line))
+  if (persona === undefined) return assembly
+  return {
+    ...assembly,
+    sections: assembly.sections.map(section => section === persona
+      ? { ...section, text: `${persona.text}${line}` }
+      : section),
+  }
+}
+
 /** Register the per-session bootstrap quarantine and promotion policy. */
 export function apply(ctx, config) {
   const commonTools = stringList(config.commonTools, 'commonTools')
@@ -245,7 +288,7 @@ export function apply(ctx, config) {
     const agent = context.agent
     if (agent === undefined) return assembled
     const state = refresh(agent, policy)
-    if (state.promoted) return assembled
+    if (state.promoted) return withWorkspaceLine(assembled, agent)
 
     const available = new Set(assembled.tools.map(tool => tool.name))
     const selectedShells = shellTools.filter(toolName => available.has(toolName))
@@ -263,7 +306,7 @@ export function apply(ctx, config) {
       tools: assembled.tools.filter(tool => bootstrap.has(tool.name)),
       contexts: [],
       ...(Array.isArray(assembled.sections)
-        ? { sections: assembled.sections.filter(section => section?.name === 'persona') }
+        ? { sections: assembled.sections.filter(section => PERSONA_SECTION_NAMES.has(section?.name)) }
         : {}),
     }
   }, { prepend: true })
