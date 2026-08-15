@@ -1,6 +1,6 @@
 /**
  * Pet state machine — pure, clock-injected. Maps the pet's working-phase
- * vocabulary (the service derives it from core session events) onto the
+ * vocabulary (derived from core session events by the service) onto the
  * pet animation contract (Codex 9-state rows + tool-specific bust rows),
  * plus the session lifecycle transitions the web UI exposes (turn end
  * celebration, no-session idle).
@@ -23,6 +23,7 @@ export type ActivityPhase =
   | 'waiting'
   | 'thinking'
   | 'tool'
+  | 'review'
   | 'done'
   | 'failed'
   | 'fetching'
@@ -50,7 +51,7 @@ export type PetAnimation =
 
 /** One input snapshot consumed by the machine. */
 export interface PetStateInput {
-  /** Current working phase of the active session. */
+  /** Current activity phase of the active session. */
   phase: ActivityPhase
   /** Human-readable status line (plain text). */
   line?: string
@@ -82,8 +83,8 @@ export const defaultPetStateConfig: PetStateConfig = { celebrateMs: 2400 }
 
 /**
  * Map one activity phase onto the animation contract.
- * - thinking → `running` (focused work).
- * - tool → `running-right` (side-alternating tool activity).
+ * - thinking → `running` and tool → `running-right` (focused work).
+ * - review → `review` while answer text is streaming.
  * - fetching/searching/analyzing/building/chatting → the tool-specific track
  *   (skins without a dedicated row resolve these to `running` in their row map).
  * - waiting → `waiting`; done → `jumping`; failed → `failed`; idle → `idle`.
@@ -92,6 +93,7 @@ export function animationForPhase(phase: ActivityPhase): PetAnimation {
   switch (phase) {
     case 'thinking': return 'running'
     case 'tool': return 'running-right'
+    case 'review': return 'review'
     case 'waiting': return 'waiting'
     case 'done': return 'jumping'
     case 'failed': return 'failed'
@@ -120,7 +122,7 @@ export class PetStateMachine {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** Consume one phase snapshot (fed by the service from session events). */
+  /** Consume one projected activity update. */
   onActivityStatus(input: PetStateInput): void {
     this.phase = input.phase
     this.line = input.line
@@ -154,7 +156,11 @@ export class PetStateMachine {
         animation = 'idle'
       }
     }
-    const bubble = this.phrase ?? this.line
+    const bubble = this.phase === 'done'
+      && this.doneAt !== undefined
+      && nowMs - this.doneAt >= this.config.celebrateMs
+      ? undefined
+      : this.phrase ?? this.line
     return {
       animation,
       ...(bubble === undefined ? {} : { bubble }),

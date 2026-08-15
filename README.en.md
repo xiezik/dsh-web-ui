@@ -34,7 +34,7 @@ When a project session is open, two panels appear to the right of the chat area 
 - **Preview**: multi-tab preview for markdown, HTML, code, diff, CSV, PDF, Office, images and plain text, with source/preview switching, split-screen editing and saving;
 - **Changes (SCM)**: a real git changes panel with stage / unstage / discard;
 - Panel widths are draggable (double-click a handle to reset), and the collapsed state plus widths persist per project;
-- All nine skins adapt the right panel — switching skins restyles the panels to match the theme.
+- All ten skins adapt the right panel — switching skins restyles the panels to match the theme.
 
 ![Right panel](docs/screenshots/19-right-panel.png)
 
@@ -84,7 +84,7 @@ All family plugins' toggles and parameters live under "Settings > Plugin config"
 
 ## Skins
 
-The skin center ships nine skins, each supporting try-on before applying: preview applies instantly and reverts fully on exit; once you are satisfied, apply it with one click.
+The skin center ships ten skins, each supporting try-on before applying: preview applies instantly and reverts fully on exit; once you are satisfied, apply it with one click.
 
 ![Skin center](docs/screenshots/03-settings-skin-center.png)
 
@@ -93,12 +93,6 @@ The skin center ships nine skins, each supporting try-on before applying: previe
 A faithful recreation of the classic Luna interface: blue gradient window chrome, a green Start button, the Bliss blue-sky desktop, and square corners throughout.
 
 ![Windows XP skin](docs/screenshots/16-skin-xp-light.png)
-
-### Minecraft Voxel
-
-Inspired by the Minecraft main menu: a pixel-art panorama skybox rotates slowly behind the interface, buttons adopt the gray stone slab style, and inputs become wooden sign posts.
-
-![Minecraft skin](docs/screenshots/15-skin-minecraft-light.png)
 
 ### Blue Fantasy
 
@@ -112,14 +106,6 @@ The deep-sea whale-goddess theme: a text-free ambience painting (a blue-haired g
 
 ![Whale Song light](docs/screenshots/24-skin-whale-song-light.png) · ![Whale Song dark](docs/screenshots/25-skin-whale-song-dark.png)
 
-### Trading Terminal
-
-A live-data stock-trading skin: a scrolling ticker tape (A-shares / HK / US / indices / crypto / FX, 红涨绿跌), live quote chips in the title bar, and a status bar with A-share / HK / US trading sessions plus HK/US index cells. With `dsh-fun-ticker` installed the tape follows your watchlist (served through its same-origin proxy); with `dsh-longbridge` installed the index cells render the broker snapshot. With neither plugin installed the skin still works standalone on public feeds (Tencent / Binance / Frankfurter) — and every fetch path fails safe to `--` cells.
-
-![Trading Terminal light](docs/screenshots/26-skin-trading-light.png) · ![Trading Terminal dark](docs/screenshots/27-skin-trading-dark.png)
-
-Four more: QQ2008 Retro (crystal blue with penguin motifs), Tonghuashun Trading (market elements woven into the interface), Dragon Heir (cinnabar dragon seal theme), and Miku (blue-violet-magenta gradients with frosted glass panels, light and dark themes).
-
 ## Installation
 
 DSH plugins are installed per **profile** with the `dsh plugin` command (`dsh web` runs the `web` profile). The recommended way is the aggregate package `dsh-web-ui-all` — one package with all plugins and skins; install `dsh-skins` instead if you only want the skins.
@@ -129,14 +115,21 @@ DSH plugins are installed per **profile** with the `dsh plugin` command (`dsh we
 The plugins are published to npm (the `@linxin666` scope) — one command installs everything:
 
 ```sh
-dsh plugin --profile web add @linxin666/dsh-web-ui-all@0.1.12
+dsh plugin --profile web add @linxin666/dsh-web-ui-all
 ```
 
 Restart `dsh web` and all plugin entries appear in the sidebar. Skins only? Install `@linxin666/dsh-skins` instead.
 
-> Pinned to the current latest release `0.1.12`. The `0.1.1` build of `dsh-pet` shipped without runtime files (`lib/types/*.js`), and some environments may resolve npm's `latest` from a stale registry cache — pinning the version is the safest install; bump `@0.1.12` to the new version when upgrading.
+> pnpm's strict (isolated) layout only puts the aggregate package at the profile top level, so the 11 child packages referenced by the patch rows (12 insert rows) stay nested and `dsh web` fails with `Cannot find package '@linxin666/dsh-...'`. The children are declared as dependencies of this package; on a strict layout, add `nodeLinker: hoisted` (or the legacy `public-hoist-pattern: ['@linxin666/*']`) to the profile's `pnpm-workspace.yaml` and reinstall.
 
 > First install may stop on `ERR_PNPM_IGNORED_BUILDS` (pnpm blocks dependency build scripts): copy the printed keys (`cloudflared` / `cpu-features` / `ssh2`) into the profile's `pnpm-workspace.yaml` `allowBuilds` list and re-run.
+
+> **pnpm 11 release-age gate**: for about 10 days after a new release, pnpm 11's `minimumReleaseAge` gate can silently resolve to older `@linxin666/*` versions (e.g. `dsh-web-ui-all@0.1.5` with the old skin center). The old skin center writes references to standalone skin packages when a skin is applied, which crashes `dsh web` at boot (`ERR_MODULE_NOT_FOUND ... dsh-client-ui-skin-*`). Exclude every `@linxin666/*` package in the profile's `pnpm-workspace.yaml` before installing or updating:
+>
+> ```yaml
+> minimumReleaseAgeExclude:
+>   - '@linxin666/*'
+> ```
 
 ### Option 2: Install from the GitHub repository (development)
 
@@ -189,7 +182,7 @@ Join our Discord server to connect with developers and other users:
 
 | Package | Origin | License |
 | --- | --- | --- |
-| dsh-task-board / dsh-git-graph / dsh-aionui-panel / dsh-pet / dsh-remote-web-ui / dsh-live-stats / dsh-web-ui-settings / dsh-skins / dsh-web-ui-all / skins | Authored by zhu1090093659 | Apache-2.0 (zhu1090093659) |
+| dsh-task-board / dsh-git-graph / dsh-aionui-panel / dsh-pet / dsh-remote-web-ui / dsh-live-stats / dsh-web-ui-settings / dsh-liangshen / dsh-skins / dsh-web-ui-all / skins | Authored by zhu1090093659 | Apache-2.0 (zhu1090093659) |
 | dsh-tool-describe-image | Ported from [whitelonng/dsh-plugin-describe-image](https://github.com/whitelonng/dsh-plugin-describe-image) (deepseek-harness `packages/vision/tool-describe-image`) | Apache-2.0 (zhu1090093659) |
 
 Third-party code merged in must keep its LICENSE and attribution; active third parties with an upstream are forked or referenced as dependencies instead of vendored.

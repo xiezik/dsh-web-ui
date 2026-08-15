@@ -352,7 +352,7 @@ export function WhalePet(props: WhalePetProps): ReactPortal {
       <div className={styles.groundShadow} aria-hidden="true" />
       {/* 工具状态气泡：双层结构（主行状态短语 + 副行状态徽标），状态着色，
           随状态轮询更新；互动反馈气泡（feedback）优先级更高。 */}
-      {feedback === null && !transientHidden && snapshot?.bubble !== undefined && snapshot.bubble !== null && snapshot.bubble !== '' && (
+      {feedback === null && !hovered && !transientHidden && snapshot?.bubble !== undefined && snapshot.bubble !== null && snapshot.bubble !== '' && (
         <div
           key={'tool-' + snapshot.phase + '-' + snapshot.bubble}
           className={styles.bubble + ' ' + (styles[statusBubbleClass(snapshot.phase)] ?? styles.bubbleTool)}

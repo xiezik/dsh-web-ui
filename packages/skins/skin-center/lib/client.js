@@ -183,8 +183,54 @@ window.__ModuleLoader__.load({
 				"bodyAttr": "data-dsh-miku",
 				"package": "@linxin666/dsh-client-ui-skin-miku",
 				"order": 9
+			},
+			{
+				"id": "qq2006",
+				"name": "QQ2006 经典版",
+				"nameEn": "QQ2006 Classic",
+				"author": "CCMKCCMK",
+				"tagline": "经典蓝色窗口 · 紧凑桌面控件 · 怀旧状态栏",
+				"description": "受 QQ2006 桌面客户端启发的轻量皮肤：蓝色渐变标题栏、浅蓝状态栏、紧凑按钮和水晶蓝界面。全部图形由代码绘制，不携带第三方二进制素材。",
+				"tags": [
+					"retro",
+					"qq",
+					"2006",
+					"classic-blue",
+					"nostalgia"
+				],
+				"accent": "#1677c8",
+				"bodyAttr": "data-dsh-qq2006",
+				"package": "@linxin666/dsh-client-ui-skin-qq2006",
+				"order": 10
 			}
 		];
+		//#endregion
+		//#region src/client/manifest.ts
+		/**
+		* Boot-manifest readiness checks for the one-click apply flow.
+		*
+		* The host half writes the skin patch synchronously, but the web app's boot
+		* graph (the `window.__DSH_BOOT__` JSON inside the served HTML) is
+		* regenerated asynchronously by the config watcher. A page reloaded right
+		* after the patch write can therefore boot into the previous skin. These
+		* helpers let the frontend poll the served document until the manifest
+		* actually reflects the target before reloading.
+		* @module @linxin666/dsh-client-ui-skin-center/manifest
+		*/
+		/** Bundle URL pattern of any skin entry in the boot manifest. */
+		const SKIN_BUNDLE_URL = /\/plugins\/@linxin666\/dsh-client-ui-skin-(?!center)[a-z0-9-]+\/client\.js/;
+		/**
+		* Whether a served GUI document's boot manifest enables the given skin.
+		* A `null` target means the stock look: no skin bundle URL may be present
+		* (the skin-center plugin's own bundle always loads and is excluded).
+		* @param documentHtml - the served GUI document (contains the boot JSON).
+		* @param target - skin id, or `null` for the stock look.
+		* @returns whether the manifest already enables the target.
+		*/
+		function manifestHasSkin(documentHtml, target) {
+			if (target === null) return !SKIN_BUNDLE_URL.test(documentHtml);
+			return documentHtml.includes(`/plugins/@linxin666/dsh-client-ui-skin-${target}/client.js`);
+		}
 		//#endregion
 		//#region src/client/try-on.ts
 		/**
@@ -464,8 +510,8 @@ window.__ModuleLoader__.load({
 			}
 		};
 		//#endregion
-		//#region \0dsh-css:/Users/kangkang/dev/dsh-web-ui/packages/skins/skin-center/src/client/skin-center.module.css.mjs
-		const css = "body[data-dsh-skin-center] .phq5BW_pluginCard{border:1px solid var(--dsw-alias-border-l1,#e2e8f0);background:var(--dsw-alias-bg-layer-2,#fff);border-radius:8px;list-style:none;overflow:hidden}body[data-dsh-skin-center] .phq5BW_cardHeader{width:100%;color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;align-items:center;padding:11px 14px;transition:background .12s;display:flex}body[data-dsh-skin-center] .phq5BW_cardHeader:hover{background:var(--dsw-alias-bg-layer-1,#f1f5f9)}body[data-dsh-skin-center] .phq5BW_cardHeader:active{background:var(--dsw-alias-bg-layer-3,#e6ecf4)}body[data-dsh-skin-center] .phq5BW_cardHeader:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2b7cd9);outline-offset:2px}body[data-dsh-skin-center] .phq5BW_headText{flex-direction:column;flex:1;gap:3px;min-width:0;display:flex}body[data-dsh-skin-center] .phq5BW_pluginName{color:var(--dsw-alias-label-primary,#172a45);align-items:baseline;gap:8px;font-size:13.5px;font-weight:600;display:flex}body[data-dsh-skin-center] .phq5BW_cardDescription{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12px;line-height:1.4}body[data-dsh-skin-center] .phq5BW_chevron,body[data-dsh-skin-center] .phq5BW_chevronOpen{color:var(--dsw-alias-label-secondary,#6b7280);flex:none;margin-left:10px;font-size:12px;transition:transform .12s}body[data-dsh-skin-center] .phq5BW_chevronOpen{transform:rotate(180deg)}body[data-dsh-skin-center] .phq5BW_cardBody{border-top:1px solid var(--dsw-alias-border-l1,#e2e8f0);flex-direction:column;gap:12px;padding:12px 14px 14px;display:flex}body[data-dsh-skin-center] .phq5BW_head{flex-direction:column;gap:6px;display:flex}body[data-dsh-skin-center] .phq5BW_titleBadge{color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;font-weight:500}body[data-dsh-skin-center] .phq5BW_intro{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12.5px;line-height:1.55}body[data-dsh-skin-center] .phq5BW_themeRow{align-items:center;gap:8px;margin-top:2px;display:flex}body[data-dsh-skin-center] .phq5BW_themeLabel{color:var(--dsw-alias-label-secondary,#6b7280);margin-right:2px;font-size:12px}body[data-dsh-skin-center] .phq5BW_themeButton{border:1px solid var(--dsw-alias-border-l3,#cbd5e1);background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#172a45);cursor:pointer;border-radius:6px;padding:5px 10px;font-size:12px;line-height:1;transition:background .12s,border-color .12s,color .12s}body[data-dsh-skin-center] .phq5BW_themeButton:hover{border-color:var(--dsw-alias-border-l4,#94a3b8)}body[data-dsh-skin-center] .phq5BW_themeButton:active{border-color:var(--dsw-alias-brand-primary,#2b7cd9);background:var(--dsw-alias-button-primary-dimmed,#e8f1fc);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .phq5BW_themeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2b7cd9);outline-offset:2px}body[data-dsh-skin-center] .phq5BW_themeButtonActive{border-color:var(--dsw-alias-brand-primary,#2b7cd9);background:var(--dsw-alias-button-primary-dimmed,#e8f1fc);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .phq5BW_list{flex-direction:column;gap:10px;display:flex}body[data-dsh-skin-center] .phq5BW_card{border:1px solid var(--dsw-alias-border-l1,#e2e8f0);background:var(--dsw-alias-bg-layer-2,#fff);border-radius:10px;flex-direction:column;gap:8px;padding:12px 14px;display:flex}body[data-dsh-skin-center] .phq5BW_cardHead{align-items:center;gap:10px;min-width:0;display:flex}body[data-dsh-skin-center] .phq5BW_swatch{width:14px;height:14px;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l4,#0f172a1f);border-radius:50%;flex:none}body[data-dsh-skin-center] .phq5BW_cardName{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:13.5px;font-weight:600;overflow:hidden}body[data-dsh-skin-center] .phq5BW_cardTagline{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12px;line-height:1.45}body[data-dsh-skin-center] .phq5BW_badge{letter-spacing:.02em;border-radius:999px;flex:none;min-width:0;margin-left:auto;padding:2px 8px;font-size:11px;font-weight:600}body[data-dsh-skin-center] .phq5BW_badgeActive{color:var(--dsw-alias-state-success-primary,#0f6b3a);background:var(--dsw-alias-state-success-tertiary,#dcf3e5)}body[data-dsh-skin-center] .phq5BW_badgeTrying{color:var(--dsw-alias-brand-primary,#1e63b8);background:var(--dsw-alias-button-primary-dimmed,#e2edfc)}body[data-dsh-skin-center] .phq5BW_actions{flex-wrap:wrap;align-items:center;gap:8px;display:flex}body[data-dsh-skin-center] .phq5BW_button{border:1px solid var(--dsw-alias-border-l3,#cbd5e1);background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#172a45);cursor:pointer;border-radius:7px;padding:6px 12px;font-size:12px;line-height:1;transition:background .12s,border-color .12s,color .12s}body[data-dsh-skin-center] .phq5BW_button:hover:not(:disabled){border-color:var(--dsw-alias-brand-primary,#2b7cd9);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .phq5BW_button:active:not(:disabled){border-color:var(--dsw-alias-button-primary-hover,#1e63b8);background:var(--dsw-alias-button-primary-dimmed,#e8f1fc);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .phq5BW_button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2b7cd9);outline-offset:2px}body[data-dsh-skin-center] .phq5BW_buttonPrimary{border-color:var(--dsw-alias-brand-primary,#2b7cd9);background:var(--dsw-alias-button-primary-fill,#2b7cd9);color:var(--dsw-alias-label-primary-foreground,#fff)}body[data-dsh-skin-center] .phq5BW_buttonPrimary:hover:not(:disabled){border-color:var(--dsw-alias-button-primary-hover,#1e63b8);background:var(--dsw-alias-button-primary-hover,#1e63b8);color:var(--dsw-alias-label-primary-foreground,#fff)}body[data-dsh-skin-center] .phq5BW_buttonPrimary:active:not(:disabled),body[data-dsh-skin-center] .phq5BW_buttonPrimary:focus-visible:not(:disabled){border-color:var(--dsw-alias-button-primary-hover,#1e63b8);background:var(--dsw-alias-button-primary-hover,#1e63b8)}body[data-dsh-skin-center] .phq5BW_buttonGhost{background:0 0;border-color:#0000}body[data-dsh-skin-center] .phq5BW_button:disabled{opacity:.55;cursor:default}body[data-dsh-skin-center] .phq5BW_error{color:var(--dsw-alias-state-error-primary,#b42318);font-size:12px}body[data-dsh-skin-center] .phq5BW_backgroundRow{flex-direction:column;gap:6px;padding:8px 0;display:flex}body[data-dsh-skin-center] .phq5BW_backgroundHead{align-items:center;gap:8px;display:flex}body[data-dsh-skin-center] .phq5BW_backgroundLabel{color:var(--dsw-alias-label-primary,#172a45);font-size:12.5px;font-weight:600}body[data-dsh-skin-center] .phq5BW_backgroundValue{font-variant-numeric:tabular-nums;color:var(--dsw-alias-brand-primary,#2b7cd9);flex:none;margin-left:auto;font-size:12px}body[data-dsh-skin-center] .phq5BW_backgroundRange{background:var(--dsw-alias-bg-layer-3,#e2e8f0);-webkit-appearance:none;appearance:none;cursor:pointer;border-radius:999px;width:100%;height:4px;margin:0}body[data-dsh-skin-center] .phq5BW_backgroundRange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;border:2px solid var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-brand-primary,#2b7cd9);width:14px;height:14px;box-shadow:0 0 0 1px var(--dsw-alias-border-l4,#0f172a1f);cursor:pointer;border-radius:50%}body[data-dsh-skin-center] .phq5BW_backgroundRange::-moz-range-thumb{border:2px solid var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-brand-primary,#2b7cd9);width:12px;height:12px;box-shadow:0 0 0 1px var(--dsw-alias-border-l4,#0f172a1f);cursor:pointer;border-radius:50%}body[data-dsh-skin-center] .phq5BW_backgroundRange:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2b7cd9);outline-offset:2px}body[data-dsh-skin-center] .phq5BW_backgroundHint{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12px;line-height:1.5}body[data-dsh-skin-center] .phq5BW_backgroundHintMuted{color:var(--dsw-alias-label-tertiary,#9aa4b5);font-size:12px;line-height:1.5}@media (prefers-reduced-motion:reduce){body[data-dsh-skin-center] .phq5BW_cardHeader,body[data-dsh-skin-center] .phq5BW_themeButton,body[data-dsh-skin-center] .phq5BW_button,body[data-dsh-skin-center] .phq5BW_chevron,body[data-dsh-skin-center] .phq5BW_chevronOpen{transition:none}}";
+		//#region \0dsh-css:packages/skins/skin-center/src/client/skin-center.module.css.mjs
+		const css = "body[data-dsh-skin-center] .eDzMgW_pluginCard{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}body[data-dsh-skin-center] .eDzMgW_pluginCard:hover{border-color:var(--dsw-alias-label-dimmed)}body[data-dsh-skin-center] .eDzMgW_pluginCardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed)}body[data-dsh-skin-center] .eDzMgW_cardHeader{appearance:none;width:100%;color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}body[data-dsh-skin-center] .eDzMgW_cardHeader:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}body[data-dsh-skin-center] .eDzMgW_headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}body[data-dsh-skin-center] .eDzMgW_pluginName{color:var(--dsw-alias-label-primary);align-items:baseline;gap:8px;font-size:15px;font-weight:600;line-height:1.4;display:flex}body[data-dsh-skin-center] .eDzMgW_cardDescription{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}body[data-dsh-skin-center] .eDzMgW_chevron,body[data-dsh-skin-center] .eDzMgW_chevronOpen{color:var(--dsw-alias-label-tertiary);flex:none;transition:transform .16s}body[data-dsh-skin-center] .eDzMgW_chevronOpen{transform:rotate(180deg)}body[data-dsh-skin-center] .eDzMgW_cardBody{border-top:1px solid var(--dsw-alias-border-l2);flex-direction:column;gap:12px;margin:0 16px;padding:12px 0 8px;display:flex}body[data-dsh-skin-center] .eDzMgW_head{flex-direction:column;gap:6px;display:flex}body[data-dsh-skin-center] .eDzMgW_titleBadge{color:var(--dsw-alias-label-secondary,#6b7280);font-size:11px;font-weight:500}body[data-dsh-skin-center] .eDzMgW_intro{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12.5px;line-height:1.55}body[data-dsh-skin-center] .eDzMgW_themeRow{align-items:center;gap:8px;margin-top:2px;display:flex}body[data-dsh-skin-center] .eDzMgW_themeLabel{color:var(--dsw-alias-label-secondary,#6b7280);margin-right:2px;font-size:12px}body[data-dsh-skin-center] .eDzMgW_themeButton{border:1px solid var(--dsw-alias-border-l3,#cbd5e1);background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#172a45);cursor:pointer;border-radius:6px;padding:5px 10px;font-size:12px;line-height:1;transition:background .12s,border-color .12s,color .12s}body[data-dsh-skin-center] .eDzMgW_themeButton:hover{border-color:var(--dsw-alias-border-l4,#94a3b8)}body[data-dsh-skin-center] .eDzMgW_themeButton:active{border-color:var(--dsw-alias-brand-primary,#2b7cd9);background:var(--dsw-alias-button-primary-dimmed,#e8f1fc);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .eDzMgW_themeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2b7cd9);outline-offset:2px}body[data-dsh-skin-center] .eDzMgW_themeButtonActive{border-color:var(--dsw-alias-brand-primary,#2b7cd9);background:var(--dsw-alias-button-primary-dimmed,#e8f1fc);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .eDzMgW_list{flex-direction:column;gap:10px;display:flex}body[data-dsh-skin-center] .eDzMgW_card{border:1px solid var(--dsw-alias-border-l1,#e2e8f0);background:var(--dsw-alias-bg-layer-2,#fff);border-radius:10px;flex-direction:column;gap:8px;padding:12px 14px;display:flex}body[data-dsh-skin-center] .eDzMgW_cardHead{align-items:center;gap:10px;min-width:0;display:flex}body[data-dsh-skin-center] .eDzMgW_swatch{width:14px;height:14px;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l4,#0f172a1f);border-radius:50%;flex:none}body[data-dsh-skin-center] .eDzMgW_cardName{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:13.5px;font-weight:600;overflow:hidden}body[data-dsh-skin-center] .eDzMgW_cardTagline{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12px;line-height:1.45}body[data-dsh-skin-center] .eDzMgW_badge{letter-spacing:.02em;border-radius:999px;flex:none;min-width:0;margin-left:auto;padding:2px 8px;font-size:11px;font-weight:600}body[data-dsh-skin-center] .eDzMgW_badgeActive{color:var(--dsw-alias-state-success-primary,#0f6b3a);background:var(--dsw-alias-state-success-tertiary,#dcf3e5)}body[data-dsh-skin-center] .eDzMgW_badgeTrying{color:var(--dsw-alias-brand-primary,#1e63b8);background:var(--dsw-alias-button-primary-dimmed,#e2edfc)}body[data-dsh-skin-center] .eDzMgW_actions{flex-wrap:wrap;align-items:center;gap:8px;display:flex}body[data-dsh-skin-center] .eDzMgW_button{border:1px solid var(--dsw-alias-border-l3,#cbd5e1);background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#172a45);cursor:pointer;border-radius:7px;padding:6px 12px;font-size:12px;line-height:1;transition:background .12s,border-color .12s,color .12s}body[data-dsh-skin-center] .eDzMgW_button:hover:not(:disabled){border-color:var(--dsw-alias-brand-primary,#2b7cd9);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .eDzMgW_button:active:not(:disabled){border-color:var(--dsw-alias-button-primary-hover,#1e63b8);background:var(--dsw-alias-button-primary-dimmed,#e8f1fc);color:var(--dsw-alias-brand-primary,#1e63b8)}body[data-dsh-skin-center] .eDzMgW_button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2b7cd9);outline-offset:2px}body[data-dsh-skin-center] .eDzMgW_buttonPrimary{border-color:var(--dsw-alias-brand-primary,#2b7cd9);background:var(--dsw-alias-button-primary-fill,#2b7cd9);color:var(--dsw-alias-label-primary-foreground,#fff)}body[data-dsh-skin-center] .eDzMgW_buttonPrimary:hover:not(:disabled){border-color:var(--dsw-alias-button-primary-hover,#1e63b8);background:var(--dsw-alias-button-primary-hover,#1e63b8);color:var(--dsw-alias-label-primary-foreground,#fff)}body[data-dsh-skin-center] .eDzMgW_buttonPrimary:active:not(:disabled),body[data-dsh-skin-center] .eDzMgW_buttonPrimary:focus-visible:not(:disabled){border-color:var(--dsw-alias-button-primary-hover,#1e63b8);background:var(--dsw-alias-button-primary-hover,#1e63b8)}body[data-dsh-skin-center] .eDzMgW_buttonGhost{background:0 0;border-color:#0000}body[data-dsh-skin-center] .eDzMgW_button:disabled{opacity:.55;cursor:default}body[data-dsh-skin-center] .eDzMgW_error{color:var(--dsw-alias-state-error-primary,#b42318);font-size:12px}body[data-dsh-skin-center] .eDzMgW_backgroundRow{flex-direction:column;gap:6px;padding:8px 0;display:flex}body[data-dsh-skin-center] .eDzMgW_backgroundHead{align-items:center;gap:8px;display:flex}body[data-dsh-skin-center] .eDzMgW_backgroundLabel{color:var(--dsw-alias-label-primary,#172a45);font-size:12.5px;font-weight:600}body[data-dsh-skin-center] .eDzMgW_backgroundValue{font-variant-numeric:tabular-nums;color:var(--dsw-alias-brand-primary,#2b7cd9);flex:none;margin-left:auto;font-size:12px}body[data-dsh-skin-center] .eDzMgW_backgroundRange{background:var(--dsw-alias-bg-layer-3,#e2e8f0);-webkit-appearance:none;appearance:none;cursor:pointer;border-radius:999px;width:100%;height:4px;margin:0}body[data-dsh-skin-center] .eDzMgW_backgroundRange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;border:2px solid var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-brand-primary,#2b7cd9);width:14px;height:14px;box-shadow:0 0 0 1px var(--dsw-alias-border-l4,#0f172a1f);cursor:pointer;border-radius:50%}body[data-dsh-skin-center] .eDzMgW_backgroundRange::-moz-range-thumb{border:2px solid var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-brand-primary,#2b7cd9);width:12px;height:12px;box-shadow:0 0 0 1px var(--dsw-alias-border-l4,#0f172a1f);cursor:pointer;border-radius:50%}body[data-dsh-skin-center] .eDzMgW_backgroundRange:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2b7cd9);outline-offset:2px}body[data-dsh-skin-center] .eDzMgW_backgroundHint{color:var(--dsw-alias-label-secondary,#6b7280);font-size:12px;line-height:1.5}body[data-dsh-skin-center] .eDzMgW_backgroundHintMuted{color:var(--dsw-alias-label-tertiary,#9aa4b5);font-size:12px;line-height:1.5}@media (prefers-reduced-motion:reduce){body[data-dsh-skin-center] .eDzMgW_pluginCard,body[data-dsh-skin-center] .eDzMgW_cardHeader,body[data-dsh-skin-center] .eDzMgW_themeButton,body[data-dsh-skin-center] .eDzMgW_button,body[data-dsh-skin-center] .eDzMgW_chevron,body[data-dsh-skin-center] .eDzMgW_chevronOpen{transition:none}}";
 		const tagId = "@linxin666/dsh-client-ui-skin-center/skin-center.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -475,42 +521,43 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var skin_center_module_css_default = {
-			"actions": "phq5BW_actions",
-			"backgroundHead": "phq5BW_backgroundHead",
-			"backgroundHint": "phq5BW_backgroundHint",
-			"backgroundHintMuted": "phq5BW_backgroundHintMuted",
-			"backgroundLabel": "phq5BW_backgroundLabel",
-			"backgroundRange": "phq5BW_backgroundRange",
-			"backgroundRow": "phq5BW_backgroundRow",
-			"backgroundValue": "phq5BW_backgroundValue",
-			"badge": "phq5BW_badge",
-			"badgeActive": "phq5BW_badgeActive",
-			"badgeTrying": "phq5BW_badgeTrying",
-			"button": "phq5BW_button",
-			"buttonGhost": "phq5BW_buttonGhost",
-			"buttonPrimary": "phq5BW_buttonPrimary",
-			"card": "phq5BW_card",
-			"cardBody": "phq5BW_cardBody",
-			"cardDescription": "phq5BW_cardDescription",
-			"cardHead": "phq5BW_cardHead",
-			"cardHeader": "phq5BW_cardHeader",
-			"cardName": "phq5BW_cardName",
-			"cardTagline": "phq5BW_cardTagline",
-			"chevron": "phq5BW_chevron",
-			"chevronOpen": "phq5BW_chevronOpen",
-			"error": "phq5BW_error",
-			"head": "phq5BW_head",
-			"headText": "phq5BW_headText",
-			"intro": "phq5BW_intro",
-			"list": "phq5BW_list",
-			"pluginCard": "phq5BW_pluginCard",
-			"pluginName": "phq5BW_pluginName",
-			"swatch": "phq5BW_swatch",
-			"themeButton": "phq5BW_themeButton",
-			"themeButtonActive": "phq5BW_themeButtonActive",
-			"themeLabel": "phq5BW_themeLabel",
-			"themeRow": "phq5BW_themeRow",
-			"titleBadge": "phq5BW_titleBadge"
+			"actions": "eDzMgW_actions",
+			"backgroundHead": "eDzMgW_backgroundHead",
+			"backgroundHint": "eDzMgW_backgroundHint",
+			"backgroundHintMuted": "eDzMgW_backgroundHintMuted",
+			"backgroundLabel": "eDzMgW_backgroundLabel",
+			"backgroundRange": "eDzMgW_backgroundRange",
+			"backgroundRow": "eDzMgW_backgroundRow",
+			"backgroundValue": "eDzMgW_backgroundValue",
+			"badge": "eDzMgW_badge",
+			"badgeActive": "eDzMgW_badgeActive",
+			"badgeTrying": "eDzMgW_badgeTrying",
+			"button": "eDzMgW_button",
+			"buttonGhost": "eDzMgW_buttonGhost",
+			"buttonPrimary": "eDzMgW_buttonPrimary",
+			"card": "eDzMgW_card",
+			"cardBody": "eDzMgW_cardBody",
+			"cardDescription": "eDzMgW_cardDescription",
+			"cardHead": "eDzMgW_cardHead",
+			"cardHeader": "eDzMgW_cardHeader",
+			"cardName": "eDzMgW_cardName",
+			"cardTagline": "eDzMgW_cardTagline",
+			"chevron": "eDzMgW_chevron",
+			"chevronOpen": "eDzMgW_chevronOpen",
+			"error": "eDzMgW_error",
+			"head": "eDzMgW_head",
+			"headText": "eDzMgW_headText",
+			"intro": "eDzMgW_intro",
+			"list": "eDzMgW_list",
+			"pluginCard": "eDzMgW_pluginCard",
+			"pluginCardOpen": "eDzMgW_pluginCardOpen",
+			"pluginName": "eDzMgW_pluginName",
+			"swatch": "eDzMgW_swatch",
+			"themeButton": "eDzMgW_themeButton",
+			"themeButtonActive": "eDzMgW_themeButtonActive",
+			"themeLabel": "eDzMgW_themeLabel",
+			"themeRow": "eDzMgW_themeRow",
+			"titleBadge": "eDzMgW_titleBadge"
 		};
 		//#endregion
 		//#region src/client/SkinCenter.tsx
@@ -546,6 +593,13 @@ window.__ModuleLoader__.load({
 			const [tryingOfficial, setTryingOfficial] = (0, react.useState)(false);
 			const [applying, setApplying] = (0, react.useState)(null);
 			const [error, setError] = (0, react.useState)(null);
+			const mounted = (0, react.useRef)(false);
+			(0, react.useEffect)(() => {
+				mounted.current = true;
+				return () => {
+					mounted.current = false;
+				};
+			}, []);
 			const tryOn = (entry) => {
 				setError(null);
 				controller.tryOn(entry).then(() => {
@@ -584,6 +638,10 @@ window.__ModuleLoader__.load({
 				const expected = target === OFFICIAL ? "none" : target;
 				let tries = 0;
 				const tick = () => {
+					if (!mounted.current) {
+						resolve(false);
+						return;
+					}
 					tries += 1;
 					fetch("/api/skin-center/state").then(async (response) => {
 						const payload = await response.json().catch(() => null);
@@ -591,11 +649,43 @@ window.__ModuleLoader__.load({
 							resolve(true);
 							return;
 						}
-						if (tries >= 20) resolve(false);
+						if (tries >= 20 || !mounted.current) resolve(false);
 						else window.setTimeout(tick, 250);
 					}).catch(() => {
-						if (tries >= 20) resolve(false);
+						if (tries >= 20 || !mounted.current) resolve(false);
 						else window.setTimeout(tick, 250);
+					});
+				};
+				tick();
+			});
+			/**
+			* Poll the served GUI document until the boot manifest actually enables
+			* the target (the config watcher regenerates it asynchronously after the
+			* patch write — reloading earlier boots the page into the previous skin),
+			* or time out.
+			* @param target - skin id, or `official` for the stock look.
+			* @returns whether the manifest caught up within the poll budget.
+			*/
+			const manifestReady = (target) => new Promise((resolve) => {
+				const expected = target === OFFICIAL ? null : target;
+				let tries = 0;
+				const tick = () => {
+					if (!mounted.current) {
+						resolve(false);
+						return;
+					}
+					tries += 1;
+					fetch(window.location.href, { cache: "no-store" }).then(async (response) => {
+						const html = await response.text().catch(() => null);
+						if (html !== null && manifestHasSkin(html, expected)) {
+							resolve(true);
+							return;
+						}
+						if (tries >= 40 || !mounted.current) resolve(false);
+						else window.setTimeout(tick, 500);
+					}).catch(() => {
+						if (tries >= 40 || !mounted.current) resolve(false);
+						else window.setTimeout(tick, 500);
 					});
 				};
 				tick();
@@ -603,7 +693,9 @@ window.__ModuleLoader__.load({
 			/**
 			* One-click apply: the host half runs `dsh-skin use <target>` (or
 			* `use official`), the config watcher hot-reloads the patch within
-			* seconds, then this page reloads to pick up the new boot graph.
+			* seconds, then this page reloads to pick up the new boot graph. The
+			* reload waits for both the patch (state poll) and the regenerated boot
+			* manifest (manifest poll) so the page never boots into the old skin.
 			* @param target - skin id, or `official` for the stock look.
 			*/
 			const applySkin = (target) => {
@@ -618,11 +710,20 @@ window.__ModuleLoader__.load({
 					if (!response.ok || payload?.ok !== true) throw new Error(payload?.error ?? `HTTP ${response.status}`);
 					setApplying(null);
 					confirmActive(target).then((confirmed) => {
-						if (confirmed) window.location.reload();
-						else {
+						if (!mounted.current) return;
+						if (!confirmed) {
 							const command = target === OFFICIAL ? "dsh-skin use official" : `dsh-skin use ${target}`;
 							setError(`${t("appliedUnconfirmed")} — ${command}`);
+							return;
 						}
+						manifestReady(target).then((ready) => {
+							if (!mounted.current) return;
+							if (ready) window.location.reload();
+							else {
+								const command = target === OFFICIAL ? "dsh-skin use official" : `dsh-skin use ${target}`;
+								setError(`${t("appliedUnconfirmed")} — ${command}`);
+							}
+						});
 					});
 				}).catch((cause) => {
 					setApplying(null);
@@ -661,7 +762,7 @@ window.__ModuleLoader__.load({
 				})]
 			});
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", {
-				className: skin_center_module_css_default.pluginCard,
+				className: open ? `${skin_center_module_css_default.pluginCard} ${skin_center_module_css_default.pluginCardOpen}` : skin_center_module_css_default.pluginCard,
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 					type: "button",
 					className: skin_center_module_css_default.cardHeader,
@@ -683,9 +784,17 @@ window.__ModuleLoader__.load({
 							title: t("cardDescription"),
 							children: t("cardDescription")
 						})]
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: open ? skin_center_module_css_default.chevronOpen : skin_center_module_css_default.chevron,
-						children: "▾"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+						width: "14",
+						height: "14",
+						viewBox: "0 0 14 14",
+						fill: "none",
+						xmlns: "http://www.w3.org/2000/svg",
+						className: open ? `${skin_center_module_css_default.chevron} ${skin_center_module_css_default.chevronOpen}` : skin_center_module_css_default.chevron,
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+							d: "M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z",
+							fill: "currentColor"
+						})
 					})]
 				}), open ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: skin_center_module_css_default.cardBody,

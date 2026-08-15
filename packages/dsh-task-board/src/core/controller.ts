@@ -94,6 +94,15 @@ export class BoardController {
   start(): void {
     this.tasks = this.deps.store.load()
     void this.reconcileRunningTasks()
+    // A sibling tab may have edited or deleted the ledger (same origin,
+    // storage events). Reload on external change so a task deleted in
+    // another tab stops firing here — and is never written back by this
+    // tab's stale copy (scheduler roll-forward, execution settlement).
+    const unsubscribeExternal = this.deps.store.subscribeExternal?.(() => {
+      this.tasks = this.deps.store.load()
+      this.notify()
+    })
+    if (unsubscribeExternal !== undefined) this.disposers.push(unsubscribeExternal)
     this.disposers.push(this.deps.sessions.list.subscribe(() => {
       this.onSessionsChanged()
     }))
@@ -329,7 +338,7 @@ export class BoardController {
     this.reconcileInFlight = true
     try {
       type Settled = Extract<ExecutionEvent, { kind: 'settled' }>
-      const events: Array<{ task: TaskRecord; event: Settled }> = []
+      const events: Array<{ taskId: string; event: Settled }> = []
       for (const task of this.tasks) {
         if (task.status !== 'running') continue
         const execution = task.executions[task.executions.length - 1]
@@ -337,14 +346,20 @@ export class BoardController {
         // boundary); reconciliation exists for background/leftover runs.
         if (execution !== undefined && this.activeExecutionIds.has(execution.id)) continue
         const event = await this.deps.exec.reconcile(task)
-        if (event !== undefined && event.kind === 'settled') events.push({ task, event })
+        if (event !== undefined && event.kind === 'settled') events.push({ taskId: task.id, event })
       }
       if (events.length === 0) return
       let changed = false
-      for (const { task, event } of events) {
+      for (const { taskId, event } of events) {
+        // The reconcile call above awaited: a sibling tab may have rewritten
+        // the ledger (storage event reload) meanwhile. Re-read the freshest
+        // record now so the stale task captured before the await can never
+        // overwrite fields the sibling wrote.
+        const task = this.tasks.find(candidate => candidate.id === taskId)
+        if (task === undefined) continue
         const next = settleExecution(task, event.executionId, event.outcome, this.now(), event.error)
         if (next === task) continue
-        this.tasks = this.tasks.map(candidate => candidate.id === task.id ? next : candidate)
+        this.tasks = this.tasks.map(candidate => candidate.id === taskId ? next : candidate)
         changed = true
       }
       if (changed) this.persistAndNotify()

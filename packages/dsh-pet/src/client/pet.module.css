@@ -115,6 +115,15 @@
   animation: pet-bubble-pop 2.6s ease-out forwards;
 }
 
+.bubbleStatus {
+  max-width: min(280px, calc(100vw - 24px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(125, 211, 252, 0.5);
+  animation: none;
+}
+
 @keyframes pet-bubble-pop {
   0% {
     opacity: 0;

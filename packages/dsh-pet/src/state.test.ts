@@ -11,6 +11,7 @@ describe('animationForPhase', () => {
   it('maps each activity phase onto the animation contract', () => {
     expect(animationForPhase('thinking')).toBe('running')
     expect(animationForPhase('tool')).toBe('running-right')
+    expect(animationForPhase('review')).toBe('review')
     expect(animationForPhase('waiting')).toBe('waiting')
     expect(animationForPhase('done')).toBe('jumping')
     expect(animationForPhase('failed')).toBe('failed')
@@ -33,7 +34,8 @@ describe('PetStateMachine', () => {
     now += 2399
     expect(machine.render().animation).toBe('jumping')
     now += 2
-    expect(machine.render().animation).toBe('idle')
+    expect(machine.render()).toMatchObject({ animation: 'idle' })
+    expect(machine.render().bubble).toBeUndefined()
   })
 
   it('shows the phrase bubble when present, else the line', () => {

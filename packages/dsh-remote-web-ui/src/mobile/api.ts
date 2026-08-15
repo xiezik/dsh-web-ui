@@ -35,10 +35,21 @@ export interface HistoryPage {
   projections?: SessionProjectionsBlock
 }
 
+/** Read-only display preferences the plugin answers locally on `/m/api`. */
+export interface MobilePreferences {
+  /** Plain Enter sends the drafted prompt (false: Enter inserts a newline). */
+  mobileEnterToSend: boolean
+}
+
 /** The workspace roster (session ids come back per workspace). */
 export async function listWorkspaces(): Promise<WorkspaceView[]> {
   const { items } = await callUnary<{ items: WorkspaceView[] }>('workspace.list', {})
   return items
+}
+
+/** Read-only mobile display preferences (answered by the plugin, not the host proxy). */
+export async function fetchMobilePreferences(): Promise<MobilePreferences> {
+  return await callUnary<MobilePreferences>('mobile.preferences', {})
 }
 
 /** One session.list page; omit the cursor for the first page. */
@@ -56,17 +67,18 @@ export async function createSession(
   return await callUnary<CreatedSession>('session.create', options)
 }
 
-/** One history window; omit beforeSeq for the tail page. */
+/** One history window; omit beforeSeq for the tail page, pass a signal to abort. */
 export async function history(
   sessionId: string,
   beforeSeq?: number,
   maxMessages = 30,
+  signal?: AbortSignal,
 ): Promise<HistoryPage> {
   return await callUnary<HistoryPage>('session.history', {
     sessionId,
     maxMessages,
     ...(beforeSeq !== undefined ? { beforeSeq } : {}),
-  })
+  }, signal)
 }
 
 /** Send one text prompt (queued: the agent picks it up in order). */
