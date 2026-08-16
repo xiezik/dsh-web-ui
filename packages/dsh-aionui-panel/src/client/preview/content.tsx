@@ -9,10 +9,19 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import { CodeBlock } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PreviewTabState } from '../store.ts'
 import { useResizableSplit } from '../hooks/useResizableSplit.ts'
 import { t } from '../locales.ts'
 import { renderMarkdown, resolveMarkdownImage } from './markdown.ts'
+import {
+  DATA_MD_SCOPE,
+  enhanceMermaidBlocks,
+  mermaidTheme,
+  rethemeMermaidBlocks,
+  shellIsDark,
+  watchShellTheme,
+} from './mermaid.ts'
 import previewCss from '../styles/preview.module.css'
 
 /** Split-ratio persistence key (AionUi contract). */
@@ -196,7 +205,33 @@ function MarkdownViewer({
       </div>
     )
   }
-  return <div className={previewCss.mdViewer} dangerouslySetInnerHTML={{ __html: html }} />
+  return <MermaidAwareMarkdown html={html} />
+}
+
+/**
+ * Rendered markdown body plus the mermaid enhancement lifecycle: fresh
+ * blocks render once per html, completed diagrams re-render on shell theme
+ * flips. The scope marker lets the chat-transcript enhancer skip this
+ * subtree (each surface owns its blocks).
+ */
+function MermaidAwareMarkdown({ html }: { html: string }): JSX.Element {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return undefined
+    void enhanceMermaidBlocks(el, { className: previewCss.mermaidBlock, theme: mermaidTheme(shellIsDark()) })
+    return watchShellTheme((isDark) => {
+      void rethemeMermaidBlocks(el, { theme: mermaidTheme(isDark) })
+    })
+  }, [html])
+  return (
+    <div
+      ref={ref}
+      className={previewCss.mdViewer}
+      {...{ [DATA_MD_SCOPE]: '1' }}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
 }
 
 /** HTML viewer: sandboxed iframe (scripts off) or source textarea. */
@@ -228,10 +263,9 @@ function HtmlViewer({
   return <iframe className={previewCss.pdfViewer} srcDoc={srcDoc} sandbox="" title="html preview" />
 }
 
-/** Plain code/text viewer. */
-function CodeViewer({ content, language }: { content: string; language: string }): JSX.Element {
-  void language
-  return <pre className={previewCss.codeViewer}><code>{content}</code></pre>
+/** Syntax-highlighted code/text viewer (official shiki core via CodeBlock). */
+export function CodeViewer({ content, language }: { content: string; language: string }): JSX.Element {
+  return <CodeBlock code={content} lang={language === '' ? undefined : language} className={previewCss.codeViewer} copyLabel={t('preview.copyCode')} copiedLabel={t('preview.copyCodeDone')} />
 }
 
 /**
@@ -365,12 +399,14 @@ function ImageViewer({ src, meta }: { src: string; meta: string }): JSX.Element 
   )
 }
 
-/** PDF viewer (blob iframe). */
+/** PDF viewer: streamed route URL (iframe src) or a legacy data URL (blob). */
 function PdfViewer({ dataUrl, title }: { dataUrl: string; title: string }): JSX.Element {
   const [url, setUrl] = useState<string | null>(null)
   useEffect(() => {
     if (!dataUrl.startsWith('data:')) {
-      setUrl(null)
+      // Same-origin /aionui-panel/raw URL: the iframe loads the stream
+      // directly (mime application/pdf, no size cap, no base64 copy).
+      setUrl(dataUrl === '' ? null : dataUrl)
       return
     }
     const blob = dataUrlToBlob(dataUrl)

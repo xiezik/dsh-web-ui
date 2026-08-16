@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { BoardController, selectedTaskOf, type ControllerDeps } from '../src/core/controller.ts'
 import { ExecutionService } from '../src/core/execution.ts'
+import { nextRunAtMs } from '../src/core/schedule.ts'
 import { InMemoryTaskStore } from '../src/core/store.ts'
 import { createTask, type TaskRecord } from '../src/core/tasks.ts'
 import { applyCreateTask } from '../src/core/use-cases/task-create.ts'
@@ -38,6 +39,25 @@ describe('use-case: create', () => {
     expect(result.tasks).toHaveLength(before.length)
     expect(result.tasks).toBe(before) // identical reference: no transition
   })
+
+  it('arms the requested schedule when enabled with a valid cron', () => {
+    const result = applyCreateTask(seed(), { title: 's', description: '', prompt: '', schedule: { enabled: true, cron: ' 0 23 * * * ' } }, NOW, 'id-s')
+    expect(result.task?.schedule?.enabled).toBe(true)
+    expect(result.task?.schedule?.cron).toBe('0 23 * * *')
+    expect(result.task?.schedule?.nextRunAt).toBe(nextRunAtMs('0 23 * * *', NOW))
+  })
+
+  it('leaves the task unscheduled for blank, invalid, or disabled schedule requests', () => {
+    const requests = [
+      { enabled: true, cron: '   ' },
+      { enabled: true, cron: 'not a cron' },
+      { enabled: false, cron: '0 9 * * *' },
+    ]
+    for (const schedule of requests) {
+      const result = applyCreateTask(seed(), { title: 's', description: '', prompt: '', schedule }, NOW, 'id-s')
+      expect(result.task?.schedule).toBeUndefined()
+    }
+  })
 })
 
 describe('use-case: update', () => {
@@ -52,6 +72,28 @@ describe('use-case: update', () => {
   it('leaves the ledger unchanged for an unknown id', () => {
     const updated = applyUpdateTask(seed(2), 'missing', { title: 'x' }, NOW)
     expect(updated.map(t => t.id)).toEqual(['id-0', 'id-1'])
+  })
+
+  it('applies execution-target patches and clears pins with undefined', () => {
+    const pinned = applyUpdateTask(seed(2), 'id-0', { workspaceId: 'ws-1', mode: 'anchored', permission: 'read-only' }, NOW + 6)
+    expect(pinned[0].workspaceId).toBe('ws-1')
+    expect(pinned[0].mode).toBe('anchored')
+    expect(pinned[0].permission).toBe('read-only')
+
+    const cleared = applyUpdateTask(pinned, 'id-0', { workspaceId: undefined, mode: undefined, permission: undefined }, NOW + 7)
+    expect(cleared[0].workspaceId).toBeUndefined()
+    expect(cleared[0].mode).toBeUndefined()
+    expect(cleared[0].permission).toBeUndefined()
+  })
+
+  it('collapses blank target strings and keeps an unknown permission out', () => {
+    const blank = applyUpdateTask(seed(2), 'id-0', { workspaceId: '   ', mode: '' }, NOW + 6)
+    expect(blank[0].workspaceId).toBeUndefined()
+    expect(blank[0].mode).toBeUndefined()
+
+    const pinned = applyUpdateTask(seed(2), 'id-0', { permission: 'workspace-write' }, NOW + 6)
+    const invalid = applyUpdateTask(pinned, 'id-0', { permission: 'root' as never }, NOW + 7)
+    expect(invalid[0].permission).toBe('workspace-write')
   })
 })
 

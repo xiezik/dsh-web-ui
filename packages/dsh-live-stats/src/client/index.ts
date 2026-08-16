@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-token-meter/client'
 import { LiveStatsSettingsCard, LiveStatsSettingsCardController, type LiveStatsSettings } from './LiveStatsSettingsCard.tsx'
+import { ensureMergeCss } from './merge-css.ts'
 import { TpsLineDockEntry } from './TpsLine.tsx'
 import { en, zh, type SettingsCardKey } from './locales.ts'
 
@@ -67,19 +68,30 @@ export const inject = ['slots', 'locale', 'connection', 'settingsScope', 'remote
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'live-stats: dictionaries')
 
+  // Merge stylesheet: pulls the TPS row onto the official StatsLine's row
+  // (see merge-css.ts). Injected once; rules are :has()-anchored on the TPS
+  // row, so nothing changes while it is unmounted.
+  ensureMergeCss()
+
   // Plugin configuration card: one staged form over the `live-stats` settings
   // namespace, contributed to the plugin-configuration section.
   const binder = ctx.get('webUiSettings') ?? ctx.settingsScope
   const liveStatsSettings = new LiveStatsSettingsCardController(
     binder.bind<LiveStatsSettings>({ namespace: LIVE_STATS_NS }),
   )
-  ctx.slots.inject('web-ui.plugin.item', () => ctx.slots.register({
-    name: 'web-ui.plugin.item',
-    id: 'live-stats',
-    order: 110,
-    locale: NS,
-    inject: () => liveStatsSettings.inject(),
-  }, LiveStatsSettingsCard))
+  ctx.slots.inject('web-ui.plugin.item', () => {
+    const unregister = ctx.slots.register({
+      name: 'web-ui.plugin.item',
+      id: 'live-stats',
+      order: 110,
+      locale: NS,
+      inject: () => liveStatsSettings.inject(),
+    }, LiveStatsSettingsCard)
+    return () => {
+      liveStatsSettings.dispose()
+      unregister()
+    }
+  })
 
   // The live TPS row mounts on the composer dock (the shipped stats-line
   // seat). Its session standard kit supplies `useProjection`, which reads the

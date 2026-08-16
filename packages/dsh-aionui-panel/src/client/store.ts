@@ -12,7 +12,7 @@
 
 import type { FileRead, FsEntry, GitStatusView, PreviewContentType, SearchHit } from '../core/types.ts'
 import type { PanelApi } from './api.ts'
-import { detectContentType, isTextType, tabIdOf } from './fileType.ts'
+import { detectContentType, isTextType, pdfPreviewUrl, tabIdOf } from './fileType.ts'
 import {
   createDebounced, evictPreviewScopes, readJson, readStoredNumber, writeJson, writeStoredNumber,
 } from './persist.ts'
@@ -69,6 +69,8 @@ export const KEY_EXPLORER_WIDTH = 'chat-workspace-width-px'
 export const KEY_PREVIEW_WIDTH = 'chat-preview-width-px'
 export const KEY_COLLAPSE = 'project-panel-collapse:'
 export const KEY_EXPLORER_UI = 'explorer-ui:'
+/** Trailing window for coalescing explorer fs-event refetches (ms). */
+export const FS_COALESCE_MS = 200
 export const KEY_SCM_UI = 'scm-ui:'
 
 /**
@@ -217,6 +219,18 @@ export interface ExplorerStore extends StateHandle<ExplorerState> {
   cancelSearch: () => void
   /** Refetch every expanded dir + active search after a host change event. */
   handleFsChange: () => void
+  /** Reveal a path in the OS file manager (right-click menu). */
+  revealInFileManager: (rel: string) => Promise<boolean>
+  /** Open a path with the OS default app (files only, right-click menu). */
+  openWithDefaultApp: (rel: string) => Promise<boolean>
+  /** Rename a path (newName is a bare name). */
+  renameEntry: (rel: string, newName: string) => Promise<boolean>
+  /** Create a directory at rel (parent dirs untouched). */
+  createDir: (rel: string) => Promise<boolean>
+  /** Create an empty file at rel. */
+  createFile: (rel: string) => Promise<boolean>
+  /** Delete a path (recursive for directories). */
+  deleteEntry: (rel: string) => Promise<boolean>
 }
 
 /** Read the persisted explorer UI state for a root (range-guarded). */
@@ -247,6 +261,8 @@ export function createExplorerStore(api: PanelApi): ExplorerStore {
   const persistDebounced = createDebounced()
   const searchDebounced = createDebounced()
   let fsVersion = 0
+  let fsInFlight = false
+  let fsScheduled: ReturnType<typeof setTimeout> | undefined
   let persistRoot = ''
   let persistExpanded: string[] = []
   let persistSelected: string | null = null
@@ -304,6 +320,45 @@ export function createExplorerStore(api: PanelApi): ExplorerStore {
       out.push(acc)
     }
     return out
+  }
+
+  /**
+   * Refetch the root plus every expanded dir (seq-guarded against stale
+   * results) and the active search after an fs change event.
+   */
+  const runFsRefresh = async (): Promise<void> => {
+    const state = handle.getSnapshot()
+    const root = state.root
+    if (root === '') return
+    const dirs = [...new Set(['', ...state.expanded])]
+    const seq = ++fsVersion
+    const results = await Promise.allSettled(dirs.map((rel) => api.list(root, rel)))
+    handle.update((prev) => {
+      if (prev.root !== root || seq !== fsVersion) return prev
+      const nextDirs = { ...prev.dirs }
+      results.forEach((result, index) => {
+        const rel = dirs[index]
+        if (result.status !== 'fulfilled' || !result.value.ok) return
+        // A dir folded while the event burst was in flight must not be
+        // re-populated (the collapse would revive from a stale snapshot).
+        if (rel !== '' && !prev.expanded.includes(rel)) return
+        nextDirs[rel] = result.value.value.entries
+      })
+      return { ...prev, dirs: nextDirs, version: prev.version + 1 }
+    })
+    if (state.search.query !== '') {
+      void api.search(root, state.search.query).then((result) => {
+        handle.update((prev) => {
+          if (prev.root !== root || prev.search.query !== state.search.query) return prev
+          return {
+            ...prev,
+            search: result.ok
+              ? { query: state.search.query, status: 'done', hits: result.value.hits, truncated: result.value.truncated }
+              : prev.search,
+          }
+        })
+      })
+    }
   }
 
   const store: ExplorerStore = Object.assign(handle, {
@@ -392,38 +447,99 @@ export function createExplorerStore(api: PanelApi): ExplorerStore {
       searchDebounced.dispose()
       handle.update((prev) => (prev.search.query === '' ? prev : { ...prev, search: { ...EMPTY_SEARCH } }))
     },
+    async revealInFileManager(rel: string) {
+      const root = handle.getSnapshot().root
+      if (root === '') return false
+      const result = await api.reveal(root, rel)
+      return result.ok
+    },
+    async openWithDefaultApp(rel: string) {
+      const root = handle.getSnapshot().root
+      if (root === '') return false
+      const result = await api.openWithDefault(root, rel)
+      return result.ok
+    },
+    async renameEntry(rel: string, newName: string) {
+      const root = handle.getSnapshot().root
+      if (root === '' || rel === '') return false
+      const result = await api.rename(root, rel, newName)
+      if (result.ok) {
+        // Drop the old subtree, move the selection to the new path, and
+        // forget the expansion of the renamed dir (its cache is gone).
+        handle.update((prev) => {
+          const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+          const newRel = parent === '' ? newName : `${parent}/${newName}`
+          const next: ExplorerState = {
+            ...prev,
+            dirs: dropSubtree(prev.dirs, rel),
+            expanded: prev.expanded.filter((item) => item !== rel),
+          }
+          if (prev.selected === rel) next.selected = newRel
+          return next
+        })
+        void this.handleFsChange()
+      }
+      return result.ok
+    },
+    async createDir(rel: string) {
+      const root = handle.getSnapshot().root
+      if (root === '') return false
+      const result = await api.mkdir(root, rel)
+      if (result.ok) {
+        // Expand the parent so the new directory shows up immediately.
+        const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+        const state = handle.getSnapshot()
+        if (parent !== '' && !state.expanded.includes(parent)) this.toggleDir(parent)
+        void this.handleFsChange()
+      }
+      return result.ok
+    },
+    async createFile(rel: string) {
+      const root = handle.getSnapshot().root
+      if (root === '') return false
+      const result = await api.newFile(root, rel)
+      if (result.ok) {
+        // Expand the parent so the new file shows up immediately.
+        const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+        const state = handle.getSnapshot()
+        if (parent !== '' && !state.expanded.includes(parent)) this.toggleDir(parent)
+        void this.handleFsChange()
+      }
+      return result.ok
+    },
+    async deleteEntry(rel: string) {
+      const root = handle.getSnapshot().root
+      if (root === '' || rel === '') return false
+      const result = await api.delete(root, rel)
+      if (result.ok) {
+        handle.update((prev) => ({
+          ...prev,
+          selected: prev.selected === rel || prev.selected?.startsWith(rel + '/') ? null : prev.selected,
+          dirs: dropSubtree(prev.dirs, rel),
+        }))
+        void this.handleFsChange()
+      }
+      return result.ok
+    },
     async handleFsChange() {
-      const state = handle.getSnapshot()
-      const root = state.root
+      const root = handle.getSnapshot().root
       if (root === '') return
-      const dirs = [...new Set(['', ...state.expanded])]
-      const seq = ++fsVersion
-      const results = await Promise.allSettled(dirs.map((rel) => api.list(root, rel)))
-      handle.update((prev) => {
-        if (prev.root !== root || seq !== fsVersion) return prev
-        const nextDirs = { ...prev.dirs }
-        results.forEach((result, index) => {
-          const rel = dirs[index]
-          if (result.status !== 'fulfilled' || !result.value.ok) return
-          // A dir folded while the event burst was in flight must not be
-          // re-populated (the collapse would revive from a stale snapshot).
-          if (rel !== '' && !prev.expanded.includes(rel)) return
-          nextDirs[rel] = result.value.value.entries
-        })
-        return { ...prev, dirs: nextDirs, version: prev.version + 1 }
-      })
-      if (state.search.query !== '') {
-        void api.search(root, state.search.query).then((result) => {
-          handle.update((prev) => {
-            if (prev.root !== root || prev.search.query !== state.search.query) return prev
-            return {
-              ...prev,
-              search: result.ok
-                ? { query: state.search.query, status: 'done', hits: result.value.hits, truncated: result.value.truncated }
-                : prev.search,
-            }
-          })
-        })
+      if (fsInFlight) {
+        // Collapse a burst of events into one trailing pass: schedule it
+        // once, then let the timer re-enter here once it fires.
+        if (fsScheduled === undefined) {
+          fsScheduled = setTimeout(() => {
+            fsScheduled = undefined
+            void this.handleFsChange()
+          }, FS_COALESCE_MS)
+        }
+        return
+      }
+      fsInFlight = true
+      try {
+        await runFsRefresh()
+      } finally {
+        fsInFlight = false
       }
     },
   })
@@ -763,6 +879,20 @@ export function createPreviewStore(api: PanelApi): PreviewStore {
       ...prev,
       tabs: prev.tabs.map((item) => (item.id === id ? { ...item, loading: true, error: null } : item)),
     }))
+    // Pdf tabs never fetch through /read: the raw route streams the bytes
+    // straight into the preview iframe, so the tab content is the route URL.
+    if (tab.contentType === 'pdf') {
+      handle.update((prev) => {
+        if (prev.root !== root) return prev
+        return {
+          ...prev,
+          tabs: prev.tabs.map((item) => (item.id === id
+            ? { ...item, loading: false, content: pdfPreviewUrl(root, item.path, Date.now()), updated: false }
+            : item)),
+        }
+      })
+      return
+    }
     const asImage = tab.contentType === 'image'
     const result = tab.diff !== undefined
       ? await api.gitDiff(root, tab.path, tab.diff.staged)
@@ -1014,6 +1144,17 @@ export function createPreviewStore(api: PanelApi): PreviewStore {
           tabs: prev.tabs.map((item) =>
             item.id === id ? { ...item, reloadNonce: (item.reloadNonce ?? 0) + 1 } : item,
           ),
+        }))
+        return
+      }
+      if (tab.contentType === 'pdf') {
+        // Streamed tab: re-point the iframe at the raw route with a fresh
+        // nonce so the browser re-fetches the bytes (no /read round-trip).
+        handle.update((prev) => ({
+          ...prev,
+          tabs: prev.tabs.map((item) => (item.id === id
+            ? { ...item, content: pdfPreviewUrl(state.root, item.path, Date.now()), updated: false, error: null }
+            : item)),
         }))
         return
       }

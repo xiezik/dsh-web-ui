@@ -19,10 +19,11 @@ import {
   settleExecution, startExecution, withStatus,
   type NewTaskInput, type TaskRecord, type TaskStatus,
 } from './tasks.ts'
+import { applyArchiveTask, applyRestoreTask } from './use-cases/task-archive.ts'
 import { applyCreateTask } from './use-cases/task-create.ts'
 import { applyDeleteTask } from './use-cases/task-delete.ts'
 import { applyScheduleNextRun as applyScheduleRollForward, applySetSchedule } from './use-cases/task-schedule.ts'
-import { applyUpdateTask } from './use-cases/task-update.ts'
+import { applyUpdateTask, type TaskUpdatePatch } from './use-cases/task-update.ts'
 
 /** The sessions face the controller needs for navigation awareness. */
 export interface SessionsControllerFace {
@@ -47,11 +48,38 @@ export interface ControllerDeps {
   reconcileDebounceMs?: number
 }
 
+/** One workspace option the execution-target pickers offer. */
+export interface ExecutionWorkspaceOption {
+  workspaceId: string
+  /** Display label (workspace title; the wiring falls back to the path). */
+  title: string
+}
+
+/** One agent-preset option the execution-target pickers offer. */
+export interface ExecutionPresetOption {
+  id: string
+  name?: string
+  description?: string
+  /** Why this preset cannot compose a session; the pickers disable it. */
+  broken?: string
+  isDefault: boolean
+}
+
+/** The execution-target option sets the UI feeds into the controller. */
+export interface ExecutionOptionsSnapshot {
+  workspaces: readonly ExecutionWorkspaceOption[]
+  presets: readonly ExecutionPresetOption[]
+}
+
 /** Immutable controller snapshot for UI subscriptions. */
 export interface ControllerSnapshot {
   tasks: readonly TaskRecord[]
   boardOpen: boolean
+  /** True when the board shows the archive view instead of the columns. */
+  archiveView: boolean
   selectedTaskId: string | undefined
+  /** Picker option sets (workspace list + agent-preset roster). */
+  executionOptions: ExecutionOptionsSnapshot
 }
 
 /** The selected task (resolved from the ledger), or undefined. */
@@ -61,6 +89,10 @@ export function selectedTaskOf(snapshot: ControllerSnapshot): TaskRecord | undef
 }
 
 function randomUuid(): string {
+  const randomUUID = globalThis.crypto?.randomUUID
+  if (randomUUID !== undefined) {
+    return randomUUID.call(globalThis.crypto!)
+  }
   const bytes = globalThis.crypto?.getRandomValues(new Uint8Array(16))
   if (bytes === undefined) {
     // Non-secure fallback (tests, odd environments).
@@ -84,7 +116,9 @@ function currentOf(sessions: SessionsControllerFace): string | undefined {
 export class BoardController {
   private tasks: TaskRecord[] = []
   private boardOpen = false
+  private archiveView = false
   private selectedTaskId: string | undefined
+  private executionOptions: ExecutionOptionsSnapshot = { workspaces: [], presets: [] }
   private listeners = new Set<() => void>()
   private disposers: Array<() => void> = []
   private readonly now: () => number
@@ -131,7 +165,9 @@ export class BoardController {
     return {
       tasks: this.tasks,
       boardOpen: this.boardOpen,
+      archiveView: this.archiveView,
       selectedTaskId: this.selectedTaskId,
+      executionOptions: this.executionOptions,
     }
   }
 
@@ -163,6 +199,20 @@ export class BoardController {
     else this.openBoard()
   }
 
+  /**
+   * Switch between the kanban columns and the archive view. Leaving the
+   * archive view with an archived task still selected closes the selection —
+   * the detail overlay must not linger over a task that is off-board.
+   */
+  toggleArchiveView(): void {
+    this.archiveView = !this.archiveView
+    if (!this.archiveView && this.selectedTaskId !== undefined) {
+      const selected = this.tasks.find(task => task.id === this.selectedTaskId)
+      if (selected?.archivedAt !== undefined) this.selectedTaskId = undefined
+    }
+    this.notify()
+  }
+
   openTask(id: string): void {
     if (this.tasks.some(task => task.id === id)) {
       this.selectedTaskId = id
@@ -186,9 +236,18 @@ export class BoardController {
     return task
   }
 
-  updateTask(id: string, patch: Partial<Pick<TaskRecord, 'title' | 'description' | 'prompt'>>): void {
+  updateTask(id: string, patch: TaskUpdatePatch): void {
     this.tasks = [...applyUpdateTask(this.tasks, id, patch, this.now())]
     this.persistAndNotify()
+  }
+
+  /**
+   * Replace (a part of) the picker option sets the UI feeds (workspace list
+   * and agent-preset roster come from the runtime, not the ledger).
+   */
+  setExecutionOptions(patch: Partial<ExecutionOptionsSnapshot>): void {
+    this.executionOptions = { ...this.executionOptions, ...patch }
+    this.notify()
   }
 
   moveTask(id: string, status: TaskStatus): void {
@@ -201,6 +260,29 @@ export class BoardController {
     this.tasks = [...tasks]
     if (selectionCleared) this.selectedTaskId = undefined
     this.persistAndNotify()
+  }
+
+  /**
+   * Archive a settled task (done/failed). Running or on-board-unsettled
+   * tasks are refused so the runner keeps exclusive ownership of their
+   * lifecycle.
+   * @returns true when applied.
+   */
+  archiveTask(id: string): boolean {
+    const { tasks, archived } = applyArchiveTask(this.tasks, id, this.now())
+    if (!archived) return false
+    this.tasks = [...tasks]
+    this.persistAndNotify()
+    return true
+  }
+
+  /** Restore an archived task back onto the board (same status column). */
+  restoreTask(id: string): boolean {
+    const { tasks, archived } = applyRestoreTask(this.tasks, id, this.now())
+    if (!archived) return false
+    this.tasks = [...tasks]
+    this.persistAndNotify()
+    return true
   }
 
   // --- scheduling ---------------------------------------------------------------
@@ -231,6 +313,18 @@ export class BoardController {
     const next = applyScheduleRollForward(this.tasks, id, nextRunAt, lastTriggeredAt, this.now())
     this.tasks = [...next]
     this.persistAndNotify()
+  }
+
+  /**
+   * Reload the ledger from the persisted store without notifying subscribers.
+   * The scheduler calls this before every tick so a task deleted in another
+   * tab (or a stale in-memory copy) can never be fired from this tab: the
+   * fire decision and the subsequent roll-forward both run on the freshest
+   * persisted truth. Deliberately silent — same-origin external changes still
+   * reach subscribers through the storage-event subscription.
+   */
+  reloadFromStore(): void {
+    this.tasks = this.deps.store.load()
   }
 
   /**

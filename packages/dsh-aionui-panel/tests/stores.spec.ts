@@ -7,7 +7,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing, FsEntry, GitStatusView, PanelEnvelope } from '../src/core/types.ts'
-import { createPanelStores, type PanelStores } from '../src/client/store.ts'
+import { createPanelStores, FS_COALESCE_MS, type PanelStores } from '../src/client/store.ts'
 import type { PanelApi } from '../src/client/api.ts'
 
 /** A fake api recording calls with canned responses. */
@@ -33,6 +33,11 @@ function fakeApi(overrides: Partial<PanelApi> = {}): { api: PanelApi; calls: str
       ok: true, value: { query: '', hits: [], truncated: false },
     })),
     delete: vi.fn(async () => ({ ok: true, value: { ok: true as const } })),
+    reveal: vi.fn(async () => ({ ok: true, value: { ok: true as const } })),
+    openWithDefault: vi.fn(async () => ({ ok: true, value: { ok: true as const } })),
+    rename: vi.fn(async () => ({ ok: true, value: { ok: true as const } })),
+    mkdir: vi.fn(async () => ({ ok: true, value: { ok: true as const } })),
+    newFile: vi.fn(async () => ({ ok: true, value: { ok: true as const } })),
     gitStatus: vi.fn(async (): Promise<PanelEnvelope<GitStatusView | null>> => ({
       ok: true,
       value: {
@@ -62,6 +67,51 @@ beforeEach(() => {
   calls = setup.calls
 })
 
+describe('explorer store menu actions', () => {
+  it('routes reveal / open-with-default to the api and reports failure', async () => {
+    stores.explorer.setRoot('/w')
+    expect(await stores.explorer.revealInFileManager('README.md')).toBe(true)
+    expect(await stores.explorer.openWithDefaultApp('README.md')).toBe(true)
+    // A failing api call must surface as false, not throw.
+    const failing = fakeApi({ reveal: vi.fn(async () => ({ ok: false, error: { code: 'internal', message: 'x' } })) })
+    const failingStores = createPanelStores(failing.api)
+    failingStores.explorer.setRoot('/w')
+    expect(await failingStores.explorer.revealInFileManager('README.md')).toBe(false)
+  })
+
+  it('createDir expands the parent and createFile leaves state intact on failure', async () => {
+    stores.explorer.setRoot('/w')
+    await vi.waitFor(() => expect(stores.explorer.getSnapshot().dirs['']).toBeDefined())
+    expect(await stores.explorer.createDir('src/deep')).toBe(true)
+    // The parent ('src') must be expanded so the new dir is visible.
+    expect(stores.explorer.getSnapshot().expanded).toContain('src')
+    const failing = fakeApi({ newFile: vi.fn(async () => ({ ok: false, error: { code: 'write-failed', message: 'x' } })) })
+    const failingStores = createPanelStores(failing.api)
+    failingStores.explorer.setRoot('/w')
+    expect(await failingStores.explorer.createFile('src/nope.txt')).toBe(false)
+  })
+
+  it('renameEntry rewrites the selection to the new path', async () => {
+    stores.explorer.setRoot('/w')
+    await vi.waitFor(() => expect(stores.explorer.getSnapshot().dirs['']).toBeDefined())
+    stores.explorer.select('README.md')
+    expect(await stores.explorer.renameEntry('README.md', 'NOTES.md')).toBe(true)
+    expect(stores.explorer.getSnapshot().selected).toBe('NOTES.md')
+  })
+
+  it('deleteEntry clears the selection and drops the subtree', async () => {
+    stores.explorer.setRoot('/w')
+    await vi.waitFor(() => expect(stores.explorer.getSnapshot().dirs['']).toBeDefined())
+    stores.explorer.toggleDir('src')
+    await vi.waitFor(() => expect(stores.explorer.getSnapshot().dirs['src']).toBeDefined())
+    stores.explorer.select('src')
+    expect(await stores.explorer.deleteEntry('src')).toBe(true)
+    const state = stores.explorer.getSnapshot()
+    expect(state.selected).toBeNull()
+    expect(state.dirs['src']).toBeUndefined()
+  })
+})
+
 describe('explorer store', () => {
   it('loads the root listing on bind and toggles dirs lazily', async () => {
     stores.explorer.setRoot('/w')
@@ -78,6 +128,41 @@ describe('explorer store', () => {
     expect(stores.explorer.getSnapshot().dirs['src']).toBeUndefined()
   })
 
+  it('a single fs change refreshes the root listing once', async () => {
+    stores.explorer.setRoot('/w')
+    await vi.waitFor(() => expect(stores.explorer.getSnapshot().dirs['']).toBeDefined())
+    const before = calls.filter((call) => call.startsWith('list:')).length
+    await stores.explorer.handleFsChange()
+    expect(calls.filter((call) => call.startsWith('list:')).length).toBe(before + 1)
+  })
+
+  it('coalesces an fs-event burst into one in-flight pass plus one trailing pass', async () => {
+    const setup = fakeApi()
+    const s = createPanelStores(setup.api)
+    s.explorer.setRoot('/w')
+    await vi.waitFor(() => expect(s.explorer.getSnapshot().dirs['']).toBeDefined())
+
+    // Gate the NEXT list call so the first fs pass stays in flight while
+    // the burst arrives.
+    let release: () => void = () => {}
+    setup.api.list.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ ok: true, value: { root: '/w', entries: [] } })
+    }))
+    const first = s.explorer.handleFsChange()
+    void s.explorer.handleFsChange()
+    void s.explorer.handleFsChange()
+    void s.explorer.handleFsChange()
+    release()
+    await first
+    // Let the single trailing timer fire and finish its pass (the default
+    // listing implementation answers the trailing pass).
+    await new Promise((resolve) => setTimeout(resolve, FS_COALESCE_MS + 60))
+    await vi.waitFor(() => expect(setup.api.list).toHaveBeenCalledTimes(3))
+
+    // 1 initial bind listing + 1 in-flight pass + 1 trailing pass = 3; the
+    // trailing pass lands the listing in state.
+    expect(s.explorer.getSnapshot().dirs['']?.map((entry) => entry.name)).toEqual(['src', 'README.md'])
+  })
   it('reveal expands the ancestor chain and selects, and clears search', async () => {
     stores.explorer.setRoot('/w')
     stores.explorer.reveal('src/deep/file.ts')
@@ -167,6 +252,45 @@ describe('scm store', () => {
     const fresh = createPanelStores(setup.api)
     fresh.scm.setRoot('/w')
     expect(fresh.scm.getSnapshot().selected).toBe('a.txt')
+  })
+})
+
+describe('preview pdf tabs (issue #239)', () => {
+  it('openFile on a pdf streams via the raw route without api.read', async () => {
+    const { api } = fakeApi()
+    const s = createPanelStores(api)
+    s.preview.setRoot('/w')
+    s.preview.openFile('/w', 'docs/manual v2.pdf')
+    await vi.waitFor(() => expect(s.preview.getSnapshot().tabs[0].content).not.toBeNull())
+    const tab = s.preview.getSnapshot().tabs[0]
+    expect(tab.contentType).toBe('pdf')
+    expect(tab.content?.startsWith('/aionui-panel/raw?root=')).toBe(true)
+    expect(tab.content).toContain(`path=${encodeURIComponent('docs/manual v2.pdf')}`)
+    expect(tab.content).toContain('&v=')
+    // Pdf tabs never go through the /read endpoint.
+    expect((api.read as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0)
+  })
+
+  it('reloadTab rebuilds the raw URL with a fresh nonce', async () => {
+    const { api } = fakeApi()
+    const s = createPanelStores(api)
+    let tick = 1000
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => tick++)
+    try {
+      s.preview.setRoot('/w')
+      s.preview.openFile('/w', 'doc.pdf')
+      await vi.waitFor(() => expect(s.preview.getSnapshot().tabs[0].content).not.toBeNull())
+      const id = s.preview.getSnapshot().tabs[0].id
+      const first = s.preview.getSnapshot().tabs[0].content
+      await s.preview.reloadTab(id)
+      const second = s.preview.getSnapshot().tabs[0].content
+      expect(second).not.toBe(first)
+      expect(second?.startsWith('/aionui-panel/raw?root=')).toBe(true)
+      expect(second).toContain('&v=')
+      expect((api.read as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0)
+    } finally {
+      nowSpy.mockRestore()
+    }
   })
 })
 

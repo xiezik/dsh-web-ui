@@ -10,7 +10,6 @@ import { join } from 'node:path'
 import { dshHome } from './dsh-home.ts'
 import { AFFINITY_MAX, emptyAffinity, type AffinityState } from './affinity.ts'
 import { defaultTreatConfig, emptyTreatLedger, type TreatLedger } from './treats.ts'
-import type { PetSkinId } from './skins.ts'
 
 /** Display configuration the user can tweak. */
 export interface PetDisplayConfig {
@@ -38,17 +37,23 @@ export const DISPLAY_INSET_MAX = 10_000
 
 /** Everything persisted for the pet. */
 export interface PetPersist {
-  /** User-customizable pet display name. */
-  name: string
-  /** Which pet skin is selected (whale default; aemeath-bust etc.). */
-  skin: PetSkinId
+  /** Selected pet id (a registry entry; clamped at service startup). */
+  petId: string
+  /**
+   * Per-pet display names keyed by pet id. A pet without an entry falls back
+   * to its manifest displayName, so only user renames are stored here.
+   */
+  names: Record<string, string>
   affinity: AffinityState
   /** Treat (小鱼干) stock ledger. */
   treats: TreatLedger
   display: PetDisplayConfig
 }
 
-/** Default pet name (used until the user renames the pet). */
+/** Pet id the legacy single-pet installs resolve to on migration. */
+export const DEFAULT_PET_ID = 'whale-girl'
+
+/** Default pet name (used only when a manifest carries no displayName). */
 export const DEFAULT_PET_NAME = '鲸鱼娘'
 
 /** Name constraints. */
@@ -56,8 +61,8 @@ export const PET_NAME_MAX_LENGTH = 20
 
 export function emptyPersist(): PetPersist {
   return {
-    name: DEFAULT_PET_NAME,
-    skin: 'whale',
+    petId: DEFAULT_PET_ID,
+    names: {},
     affinity: emptyAffinity(),
     treats: emptyTreatLedger(),
     display: { ...defaultDisplayConfig },
@@ -78,6 +83,23 @@ function finiteNum(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
+/** A persisted document from any schema era (legacy carried a flat `name`
+ * and a `skin` field — see the fork migration below). */
+type PetPersistDocument = Partial<PetPersist> & { name?: unknown; skin?: unknown }
+
+/** Sanitize the per-pet names map (string keys, non-empty trimmed values). */
+function loadPetNames(parsed: PetPersistDocument): Record<string, string> {
+  const names: Record<string, string> = {}
+  if (typeof parsed.names !== 'object' || parsed.names === null) return names
+  for (const [id, value] of Object.entries(parsed.names as Record<string, unknown>)) {
+    if (id === '' || typeof value !== 'string') continue
+    const name = value.trim()
+    if (name === '') continue
+    names[id] = name.slice(0, PET_NAME_MAX_LENGTH)
+  }
+  return names
+}
+
 /** Clamp one count/score into [0, max]. */
 function clamp(value: number, max: number): number {
   return Math.min(max, Math.max(0, value))
@@ -87,7 +109,7 @@ function clamp(value: number, max: number): number {
 export function loadPetPersist(dir: string = petHomeDir()): PetPersist {
   try {
     const raw = readFileSync(join(dir, 'pet.json'), 'utf8')
-    const parsed = JSON.parse(raw) as Partial<PetPersist>
+    const parsed = JSON.parse(raw) as PetPersistDocument
     const base = emptyPersist()
     const rawAffinity = (parsed.affinity ?? {}) as Partial<AffinityState>
     const affinity: AffinityState = {
@@ -113,13 +135,25 @@ export function loadPetPersist(dir: string = petHomeDir()): PetPersist {
       right: Math.round(clamp(finiteNum(rawDisplay.right, base.display.right), DISPLAY_INSET_MAX)),
       bottom: Math.round(clamp(finiteNum(rawDisplay.bottom, base.display.bottom), DISPLAY_INSET_MAX)),
     }
+    let petId = typeof parsed.petId === 'string' && parsed.petId.trim() !== ''
+      ? parsed.petId.trim()
+      : base.petId
+    // Fork migration: pre-registry installs persisted a `skin` field
+    // ('whale' | 'aemeath-bust'). Map the legacy aemeath selection onto the
+    // registry pet id so the upgrade keeps the user's pet choice.
+    if (petId === DEFAULT_PET_ID && parsed.skin === 'aemeath-bust') {
+      petId = 'aemeath-bust'
+    }
+    const names = loadPetNames(parsed)
+    // Legacy migration: pre-registry installs persisted one flat `name`
+    // field. Move it onto the selected pet (the legacy whale-girl unless the
+    // file already names another pet) so renames survive the upgrade.
+    if (typeof parsed.name === 'string' && parsed.name.trim() !== '' && names[petId] === undefined) {
+      names[petId] = parsed.name.trim().slice(0, PET_NAME_MAX_LENGTH)
+    }
     return {
-      name: typeof parsed.name === 'string' && parsed.name.trim() !== ''
-        ? parsed.name
-        : base.name,
-      skin: (parsed.skin === 'whale' || parsed.skin === 'aemeath-bust')
-        ? parsed.skin
-        : base.skin,
+      petId,
+      names,
       affinity,
       treats,
       display,

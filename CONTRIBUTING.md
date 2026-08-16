@@ -4,14 +4,17 @@
 入口；仓库的全部规则与机制以 [AGENTS.md](AGENTS.md)（及其分层指令）为准，
 冲突时以 AGENTS.md 为准。
 
-## PR 范围：只接受修复，不接受新功能
+## PR 范围：接受修复、增强与优化，暂不接受全新功能
 
-本仓库目前**只接受修复型 PR**：bug 修复、兼容性适配、维护与文档修正。
-**不接受**新增特性 / 新功能的 PR；有相关需求请先在
+本仓库接受以下 PR：
+
+- **修复**：bug 修复、兼容性适配；
+- **增强 / 优化**：现有功能的改进、性能 / 体验优化、维护与文档修正；
+- **新皮肤**：属于内容贡献，始终欢迎直接提 PR。
+
+暂**不接受**全新特性 / 新功能的 PR；有相关需求请先在
 [Issues](https://github.com/zhu1090093659/dsh-web-ui/issues) 提 issue 讨论，
-不要直接开 PR。
-
-例外：**新皮肤**属于内容贡献，仍欢迎直接提 PR。
+确认后再开 PR。
 
 ## 开发前置
 
@@ -59,8 +62,9 @@ pnpm docs:write-pair <包目录名>   # 如 dsh-ssh 或 qq98
 
 ## 新增包或皮肤
 
-> 范围约束：外部贡献者目前**不要直接提交新插件 / 新功能 PR**，请先提 issue；
-> 新皮肤不受此限制，仍可直接提 PR。下列命令供 issue 确认后的实现使用。
+> 范围约束：外部贡献者目前**不要直接提交新插件 / 全新功能 PR**，请先提 issue；
+> 对现有插件的增强 / 优化与新皮肤不受此限制，可直接提 PR。下列命令供 issue
+> 确认后的实现使用。
 
 - 插件：`node scripts/dsh-plugin-new <name>` 生成骨架（自动含双语 README
   三件套与 AGENTS.md 模板），然后按 [docs/plugins.md](docs/plugins.md)
@@ -70,9 +74,9 @@ pnpm docs:write-pair <包目录名>   # 如 dsh-ssh 或 qq98
   `pnpm --filter @linxin666/dsh-skins build` 把皮肤资产并入聚合包。
 - 新增 / 删除包或改皮肤清单时，同步更新 [docs/publish-prep.md](docs/publish-prep.md)
   的发布清单快照。
-- 第三方插件想进「社区插件」索引卡片（设置 → 插件配置 → Web UI 插件）时，按
+- 第三方插件想进「社区插件」一级设置分区（设置 → 社区插件）时，按
   [docs/plugins.md](docs/plugins.md) 的登记说明在
-  `packages/dsh-web-ui-settings/community.json` 追加条目并重新生成注册表
+  `packages/dsh-community-plugins/community.json` 追加条目并重新生成注册表
   （`node scripts/community-index`）。
 
 ## 文档体系
@@ -96,5 +100,11 @@ pnpm docs:write-pair <包目录名>   # 如 dsh-ssh 或 qq98
 
 ## Issue 与讨论
 
-- Bug / 功能请求用 [Issue 模板](.github/ISSUE_TEMPLATE/standard_issue.yml) 提交；
-- 社区交流见根 README 的「社区」小节。
+- Bug / 功能请求用 [Issue 模板](.github/ISSUE_TEMPLATE/standard_issue.yml) 提交，
+  Bug 用「Bug 报告」表单（自动附加 `bug` 标签），需附截图、冒烟测试、引用代码与建议补丁；
+- 社区交流见根 README 的「社区」小节；
+- 提 Issue 前先按标签检索（`bug` / `enhancement` / `question` /
+  `good first issue` / `duplicate`）并搜索关键词，确认没有重复再提交；
+- 标签体系、分类标准与关闭流程见 [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md)；
+- 已解决、重复或已回答的 Issue 会被维护者关闭并附说明，如需继续跟进请
+  在评论区说明或重开。

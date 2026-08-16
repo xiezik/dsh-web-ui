@@ -49,12 +49,26 @@ export function TaskBoard({ controller }: { controller: BoardController }) {
   const [filter, setFilter] = useState('')
   const [showNew, setShowNew] = useState(false)
   const selected = selectedTaskOf(snapshot)
-  const visible = snapshot.tasks.filter(task => matchesFilter(task, filter))
+  const archiveView = snapshot.archiveView
+  // Archived tasks leave the columns; the archive view shows them instead.
+  const visible = snapshot.tasks.filter(task =>
+    (archiveView ? task.archivedAt !== undefined : task.archivedAt === undefined)
+    && matchesFilter(task, filter),
+  )
   const openTask = useCallback((id: string): void => { controller.openTask(id) }, [controller])
 
   return (
     <div className={css.board} data-dsh-taskboard-board="">
       <header className={css.boardHeader}>
+        <button
+          type="button"
+          className={`${css.ghostButton} ${css.backButton}`}
+          aria-label={t('board.close')}
+          onClick={() => { controller.closeBoard() }}
+        >
+          <span aria-hidden="true">‹</span>
+          <span>{t('board.close')}</span>
+        </button>
         <h2 className={css.boardTitle}>{t('board.title')}</h2>
         <input
           className={css.search}
@@ -66,39 +80,56 @@ export function TaskBoard({ controller }: { controller: BoardController }) {
         />
         <button
           type="button"
+          className={archiveView ? css.primaryButton : css.ghostButton}
+          onClick={() => { controller.toggleArchiveView() }}
+        >
+          {archiveView
+            ? t('board.backToBoard')
+            : t('board.archiveView', { count: String(snapshot.tasks.filter(task => task.archivedAt !== undefined).length) })}
+        </button>
+        <button
+          type="button"
           className={css.primaryButton}
           onClick={() => { setShowNew(true) }}
         >
           + {t('board.new')}
         </button>
-        <button
-          type="button"
-          className={css.ghostButton}
-          onClick={() => { controller.closeBoard() }}
-        >
-          {t('board.close')}
-        </button>
       </header>
 
       <div className={css.columns}>
-        {COLUMNS.map(column => {
-          const tasks = visible.filter(task => task.status === column.status)
-          return (
-            <section key={column.status} className={css.column} data-status={column.status}>
-              <header className={css.columnHeader}>
-                <span className={css.statusDot} data-status={column.status} aria-hidden="true" />
-                <h3 className={css.columnTitle}>{t(STATUS_KEY[column.status])}</h3>
-                <span className={css.columnCount}>{tasks.length}</span>
-              </header>
-              <div className={css.cards}>
-                {tasks.map(task => (
-                  <MemoTaskCard key={task.id} task={task} onOpen={openTask} />
-                ))}
-                {tasks.length === 0 && <div className={css.columnEmpty}>{t('board.empty')}</div>}
-              </div>
-            </section>
-          )
-        })}
+        {archiveView ? (
+          <section className={css.column} data-status="archived">
+            <header className={css.columnHeader}>
+              <h3 className={css.columnTitle}>{t('board.archive')}</h3>
+              <span className={css.columnCount}>{visible.length}</span>
+            </header>
+            <div className={css.cards}>
+              {visible.map(task => (
+                <MemoTaskCard key={task.id} task={task} onOpen={openTask} />
+              ))}
+              {visible.length === 0 && <div className={css.columnEmpty}>{t('archive.empty')}</div>}
+            </div>
+          </section>
+        ) : (
+          COLUMNS.map(column => {
+            const tasks = visible.filter(task => task.status === column.status)
+            return (
+              <section key={column.status} className={css.column} data-status={column.status}>
+                <header className={css.columnHeader}>
+                  <span className={css.statusDot} data-status={column.status} aria-hidden="true" />
+                  <h3 className={css.columnTitle}>{t(STATUS_KEY[column.status])}</h3>
+                  <span className={css.columnCount}>{tasks.length}</span>
+                </header>
+                <div className={css.cards}>
+                  {tasks.map(task => (
+                    <MemoTaskCard key={task.id} task={task} onOpen={openTask} />
+                  ))}
+                  {tasks.length === 0 && <div className={css.columnEmpty}>{t('board.empty')}</div>}
+                </div>
+              </section>
+            )
+          })
+        )}
       </div>
 
       {selected !== undefined && (

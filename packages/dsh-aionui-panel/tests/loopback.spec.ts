@@ -109,6 +109,21 @@ describe('/aionui-panel loopback fence', () => {
     expect(list).toHaveBeenCalledWith('/w', '')
   })
 
+  it('serves the full 127/8 range as loopback (unified fence)', async () => {
+    const list = vi.fn(async () => ({ root: '/w', entries: [] }))
+    const { ctx, registrations } = fakeCtx()
+    registerPanelRoutes(ctx as never, { list } as never, { status: async () => null } as never)
+    const prefix = registrations.find((row) => row.kind === 'prefix')!
+
+    const result = await drive(prefix.handler, '/aionui-panel/list', {
+      remoteAddress: '127.0.0.2',
+      host: '127.0.0.2:3000',
+      body: JSON.stringify({ root: '/w', path: '' }),
+    })
+
+    expect(result.status).toBe(200)
+    expect(list).toHaveBeenCalledWith('/w', '')
+  })
   it('rejects non-loopback JSON operations with 403 before touching the service', async () => {
     const list = vi.fn(async () => ({ root: '/w', entries: [] }))
     const { ctx, registrations } = fakeCtx()
@@ -128,7 +143,7 @@ describe('/aionui-panel loopback fence', () => {
   })
 
   it('rejects non-loopback GET /aionui-panel/raw with 403', async () => {
-    const readRaw = vi.fn(async () => ({ data: Buffer.from('x'), mime: 'text/plain', size: 1 }))
+    const readRaw = vi.fn(async () => ({ abs: '/w/a.txt', mime: 'text/plain', size: 1, mtime: 1 }))
     const { ctx, registrations } = fakeCtx()
     registerPanelRoutes(ctx as never, { readRaw } as never, { status: async () => null } as never)
     const prefix = registrations.find((row) => row.kind === 'prefix')!

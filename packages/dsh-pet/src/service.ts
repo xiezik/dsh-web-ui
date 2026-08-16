@@ -3,8 +3,12 @@
  * the pure event projection (`event-projection`) onto the state machine,
  * delegates the affinity economy to the ledger (`ledger`), and routes
  * persistence through `persist`. The API gateway maps these methods onto
- * `pet.state` / `pet.interact` / `pet.setVisible` / `pet.setConfig` for
- * browser consumers.
+ * `pet.state` / `pet.pets` / `pet.interact` / `pet.setVisible` /
+ * `pet.setConfig` / `pet.setName` / `pet.setPet` for browser consumers.
+ *
+ * Concurrent sessions each keep their own machine: the sprite animation
+ * follows the most recent meaningful event (the display session) while the
+ * state view carries one bubble per active session.
  * @module @linxin666/dsh-pet/service
  */
 
@@ -21,6 +25,7 @@ import {
 } from './event-projection.ts'
 import { PetLedger, type LedgerConfig, type LedgerInteractionResult } from './ledger.ts'
 import {
+  DEFAULT_PET_NAME,
   DISPLAY_INSET_MAX,
   DISPLAY_SIZE_MAX,
   DISPLAY_SIZE_MIN,
@@ -31,6 +36,14 @@ import {
   type PetDisplayConfig,
   type PetPersist,
 } from './persist.ts'
+import {
+  loadPetRegistry,
+  petEntryView,
+  petPackageRoot,
+  type PetDefinition,
+  type PetManifest,
+  type PetRegistry,
+} from './registry.ts'
 import {
   defaultPetStateConfig,
   PetStateMachine,
@@ -53,14 +66,22 @@ export interface PetConfig {
   persistDir?: string
   /** Master switch for the plugin (browser half + host routes). */
   enabled?: boolean
+  /** Prebuilt registry (tests); defaults to scanning the package + user dirs. */
+  registry?: PetRegistry
+  /** Extra manifest entries composed by the embedding application. */
+  pets?: readonly PetManifest[]
 }
 
 /**
- * The pet's settings-namespace section: the display fields and name the web
- * settings surface edits. `right`/`bottom` are also updated by drag
+ * The pet's settings-namespace section: the pet selection and display fields
+ * the web settings surface edits. `right`/`bottom` are also updated by drag
  * interactions, which keep the settings document in sync through the service.
+ * Naming is per pet and lives outside the settings document (the hover-panel
+ * rename targets the selected pet).
  */
 export interface PetSettingsSection {
+  /** Selected pet id (a registry entry; the service clamps stale values). */
+  petId?: string
   /** Master switch. */
   visible: boolean
   /** Scale of the rendered pet in px (sprite cell height). */
@@ -69,8 +90,6 @@ export interface PetSettingsSection {
   right: number
   /** Vertical inset from the viewport bottom edge, px. */
   bottom: number
-  /** User-customizable pet display name. */
-  name: string
   /** Master switch for the plugin (browser half + host routes). */
   enabled?: boolean
 }
@@ -78,20 +97,52 @@ export interface PetSettingsSection {
 /** Settings namespace of the pet capability. Spelled here rather than imported: the browser half spells the same value. */
 export const PET_SETTINGS_NAMESPACE = 'pet'
 
+/**
+ * One active session as the pet displays it. Sessions run in parallel, so
+ * each gets its own bubble while the sprite itself follows the most recent
+ * meaningful event (the display session).
+ */
+export interface PetSessionView {
+  /** Session identity (stringified for the wire; never exposed as a key). */
+  sessionId: string
+  /** The animation this session's activity maps onto. */
+  animation: PetStateSnapshot['animation']
+  /** This session's status bubble copy. */
+  bubble: string
+  /** This session's raw activity phase. */
+  phase: PetStateSnapshot['phase']
+}
+
+/** Hard cap on simultaneously displayed session bubbles (most recent first). */
+export const MAX_SESSION_BUBBLES = 12
+
 /** Snapshot returned by `pet.state`. */
 export interface PetStateView {
   animation: PetStateSnapshot['animation']
   bubble?: string
   phase: PetStateSnapshot['phase']
   sessionActive: boolean
+  /**
+   * Per-session bubbles for every concurrently active session, most recent
+   * first; optional so older hosts without the multi-session view stay
+   * consumable. The single 'bubble' above mirrors the display session.
+   */
+  sessions?: PetSessionView[]
   /** Affinity ledger snapshot. */
   affinity: PetAffinityView
   /** Display configuration. */
   display: PetDisplayConfig
-  /** User-customizable pet display name. */
+  /** The selected pet's registry identity. */
+  pet: {
+    /** Registry id. */
+    id: string
+    /** Manifest display name (unrenamed default). */
+    displayName: string
+    /** Manifest description. */
+    description: string
+  }
+  /** The selected pet's display name (user rename or manifest default). */
   name: string
-  /** Currently selected pet skin (drives which atlas/tracks the client loads). */
-  skin: PetSkinId
   /** Treat (小鱼干) stock snapshot. */
   treats: {
     /** Stocked treats now. */
@@ -117,6 +168,13 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/** Per-session pet activity: projection runtime plus the session's own machine. */
+interface SessionActivity {
+  runtime: ProjectionRuntime
+  machine: PetStateMachine
+  /** The session's most recent meaningful input (for display fallback). */
+  lastInput?: PetStateInput
+}
 
 /**
  * Cordis service exposing the pet RPC domain. Lazy: nothing is scanned or
@@ -128,23 +186,47 @@ export class PetService extends Service {
   static inject: string[] = []
 
   private readonly machine: PetStateMachine
+  private readonly stateConfig: PetStateConfig
   private readonly ledger: PetLedger
+  private readonly registry: PetRegistry
   private readonly persistDir: string
   private enabled: boolean
   private disposeActivity: (() => void) | undefined
   /** Session whose most recent meaningful event currently drives the global pet. */
   private displaySession: Session | undefined
-  private readonly sessionActivity = new WeakMap<Session, ProjectionRuntime>()
+  /**
+   * Per-session activity, most recent last (Map insertion order). Bounded by
+   * MAX_SESSION_BUBBLES so a burst of sessions cannot grow it without bound;
+   * disposed sessions are removed by the 'session/disposed' listener.
+   */
+  private readonly sessionActivity = new Map<Session, SessionActivity>()
 
   constructor(ctx: Context, config: PetConfig = {}) {
     super(ctx, 'pet')
     this.persistDir = config.persistDir ?? petHomeDir()
-    const ledgerConfig: LedgerConfig = { affinity: config.affinity, treats: config.treats }
-    this.ledger = new PetLedger(loadPetPersist(this.persistDir), ledgerConfig)
-    this.machine = new PetStateMachine({
-      ...defaultPetStateConfig,
-      ...(config.state ?? {}),
-    })
+    this.registry = config.registry
+      ?? loadPetRegistry({
+        packageRoot: petPackageRoot(import.meta.url),
+        ...(config.pets === undefined ? {} : { extra: config.pets }),
+      })
+    if (this.registry.entries.length === 0) {
+      throw new Error('[dsh-pet] no valid pet manifests found; nothing to render')
+    }
+    let persist = loadPetPersist(this.persistDir)
+    if (this.registry.byId(persist.petId) === undefined) {
+      // The selected pet no longer exists (removed or a fresh install with a
+      // copied pet.json): fall back to the registry default.
+      persist = { ...persist, petId: this.registry.defaultEntry().id }
+    }
+    const selected = this.registry.byId(persist.petId) ?? this.registry.defaultEntry()
+    const ledgerConfig: LedgerConfig = {
+      affinity: config.affinity,
+      treats: config.treats,
+      remarks: selected.remarks,
+    }
+    this.ledger = new PetLedger(persist, ledgerConfig)
+    this.stateConfig = { ...defaultPetStateConfig, ...(config.state ?? {}) }
+    this.machine = new PetStateMachine(this.stateConfig)
     this.enabled = config.enabled ?? true
 
     this.syncActivity()
@@ -165,14 +247,42 @@ export class PetService extends Service {
     return { ...this.ledger.snapshot.display }
   }
 
-  /** Current persisted pet name (read-only view). */
-  petName(): string {
-    return this.ledger.snapshot.name
+  /** RPC: the registry entries the browser half renders and selects from. */
+  async pets(): Promise<PetDefinition[]> {
+    return this.registry.entries.map(petEntryView)
   }
 
-  /** Current persisted pet skin id (read-only view). */
-  petSkin(): PetSkinId {
-    return this.ledger.snapshot.skin
+  /** The loaded registry (the asset routes serve its entries). */
+  registrySnapshot(): PetRegistry {
+    return this.registry
+  }
+
+  /** The selected pet's registry entry. */
+  activeEntry(): NonNullable<PetRegistry['entries'][number]> {
+    return this.registry.byId(this.selectedPetId()) ?? this.registry.defaultEntry()
+  }
+
+  /** Currently selected pet id (persisted). */
+  selectedPetId(): string {
+    return this.ledger.snapshot.petId
+  }
+
+  /** The display name of one pet (user rename or manifest displayName). */
+  petName(petId: string = this.selectedPetId()): string {
+    const stored = this.ledger.snapshot.names[petId]
+    if (stored !== undefined && stored.trim() !== '') return stored
+    return this.registry.byId(petId)?.displayName ?? DEFAULT_PET_NAME
+  }
+
+  /** RPC: switch the selected pet (persisted, settings document mirrored). */
+  async setPetId(petId: string): Promise<{ ok: true; petId: string } | { ok: false; error: string }> {
+    const entry = this.registry.byId(petId)
+    if (entry === undefined) return { ok: false, error: 'unknown-pet' }
+    this.ledger.setPetId(entry.id)
+    this.ledger.setRemarks(entry.remarks)
+    this.flush()
+    this.syncSettingsFromPet()
+    return { ok: true, petId: entry.id }
   }
 
   /** Start or stop the session-activity listeners that drive the pet. */
@@ -190,7 +300,7 @@ export class PetService extends Service {
     this.disposeActivity = (() => {
       const disposers = [
         this.ctx.on('session/event', (session: Session, event: SessionEvent) => {
-          const runtime = this.activityRuntime(session)
+          const runtime = this.activityOf(session).runtime
           // `activity/status` is an optional compatibility input. It is not
           // declared as a durable event type by this package because current
           // Harness installations publish the official session vocabulary.
@@ -220,27 +330,60 @@ export class PetService extends Service {
           }
         }),
         this.ctx.on('session/disposed', (session: Session) => {
+          this.ledger.forgetSession(String(session.id))
+          this.sessionActivity.delete(session)
           if (session !== this.displaySession) return
+          // The display session is gone: fall back to the most recent
+          // remaining session's last input, or settle to idle when none.
           this.displaySession = undefined
-          this.machine.onSessionDisposed()
+          const remaining = [...this.sessionActivity.entries()].at(-1)
+          if (remaining !== undefined) {
+            const [nextSession, activity] = remaining
+            this.displaySession = nextSession
+            if (activity.lastInput !== undefined) this.machine.onActivityStatus(activity.lastInput)
+            this.machine.onSessionActive()
+          } else {
+            this.machine.onSessionDisposed()
+          }
         }),
       ]
       return () => { for (const dispose of disposers) dispose() }
     })()
   }
 
-  /** Return the projection state associated with one live session. */
-  private activityRuntime(session: Session): ProjectionRuntime {
-    let runtime = this.sessionActivity.get(session)
-    if (runtime === undefined) {
-      runtime = emptyProjectionRuntime()
-      this.sessionActivity.set(session, runtime)
+  /** Return the per-session activity record, creating it on first sight. */
+  private activityOf(session: Session): SessionActivity {
+    let activity = this.sessionActivity.get(session)
+    if (activity === undefined) {
+      activity = {
+        runtime: emptyProjectionRuntime(),
+        machine: new PetStateMachine(this.stateConfig),
+      }
+      this.sessionActivity.set(session, activity)
     }
-    return runtime
+    return activity
   }
 
-  /** Commit one activity as the host-global pet's most recent display state. */
+  /**
+   * Commit one activity: the session's own machine renders its bubble, and
+   * the session becomes the host-global display session (most recent
+   * meaningful event wins the sprite animation).
+   */
   private applyActivity(session: Session, input: PetStateInput): void {
+    const activity = this.activityOf(session)
+    activity.lastInput = input
+    activity.machine.onActivityStatus(input)
+    activity.machine.onSessionActive()
+    // Move to the tail so map order reads most-recent-last, then trim the
+    // oldest session states beyond the bubble cap. The display session is
+    // reassigned below, so trimming its stale predecessor is safe.
+    this.sessionActivity.delete(session)
+    this.sessionActivity.set(session, activity)
+    while (this.sessionActivity.size > MAX_SESSION_BUBBLES) {
+      const oldest = this.sessionActivity.keys().next().value
+      if (oldest === undefined) break
+      this.sessionActivity.delete(oldest)
+    }
     this.displaySession = session
     this.machine.onActivityStatus(input)
     this.machine.onSessionActive()
@@ -274,45 +417,39 @@ export class PetService extends Service {
     return { ok: true, display: this.ledger.snapshot.display }
   }
 
-  /** RPC: rename the pet (trimmed, 1–20 chars). */
+  /** RPC: rename the selected pet (trimmed, 1–20 chars, per-pet storage). */
   async setName(name: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
     const trimmed = name.trim()
     if (trimmed === '') return { ok: false, error: 'name-empty' }
     if (trimmed.length > PET_NAME_MAX_LENGTH) return { ok: false, error: 'name-too-long' }
-    this.ledger.setName(trimmed)
+    this.ledger.setPetName(this.selectedPetId(), trimmed)
     this.flush()
-    this.syncSettingsFromPet()
     return { ok: true, name: trimmed }
   }
 
   /**
-   * Apply a committed settings section to the persisted display config. Called
-   * by the settings surface on every change; values are clamped exactly like
-   * the setConfig RPC so both write paths converge.
+   * Apply a committed settings section to the persisted selection and display
+   * config. Called by the settings surface on every change; values are
+   * clamped exactly like the setConfig RPC so both write paths converge.
    * @param section - the resolved settings section.
    */
   applySettingsSection(section: PetSettingsSection): void {
+    const selected = typeof section.petId === 'string' ? this.registry.byId(section.petId) : undefined
+    if (selected !== undefined) {
+      this.ledger.setPetId(selected.id)
+      this.ledger.setRemarks(selected.remarks)
+    } else if (section.petId !== undefined) {
+      // The stored selection names a pet the registry no longer has: keep the
+      // current selection and repair the settings document.
+      this.syncSettingsFromPet()
+    }
     const next = { ...this.ledger.snapshot.display }
     next.visible = section.visible && (section.enabled ?? true)
     next.size = Math.round(Math.min(DISPLAY_SIZE_MAX, Math.max(DISPLAY_SIZE_MIN, section.size)))
     next.right = Math.round(Math.min(DISPLAY_INSET_MAX, Math.max(0, section.right)))
     next.bottom = Math.round(Math.min(DISPLAY_INSET_MAX, Math.max(0, section.bottom)))
     this.ledger.setDisplay(next)
-    this.ledger.setName(section.name.trim())
     this.flush()
-  }
-
-  /** RPC: switch the pet skin (persisted; the client reloads the atlas on the next state poll). */
-  async setSkin(skinId: string): Promise<{ ok: true; skin: PetSkinId } | { ok: false; error: string }> {
-    const skin = skinOf(skinId)
-    if (skin.id !== this.ledger.snapshot.skin) {
-      // Keep the previous skin's default name if the user never renamed.
-      const prevDefault = PET_SKINS[this.ledger.snapshot.skin]?.defaultName
-      const name = this.ledger.snapshot.name === prevDefault ? skin.defaultName : this.ledger.snapshot.name
-      this.ledger.setSkin(skin.id, name)
-      this.flush()
-    }
-    return { ok: true, skin: this.ledger.snapshot.skin }
   }
 
   /** Mirror the persisted display config into the settings document (best-effort). */
@@ -325,7 +462,7 @@ export class PetService extends Service {
       size: snapshot.display.size,
       right: snapshot.display.right,
       bottom: snapshot.display.bottom,
-      name: snapshot.name,
+      petId: snapshot.petId,
     }).catch(() => {
       // A settings write failure must not break the pet's own persistence.
     })
@@ -343,6 +480,22 @@ export class PetService extends Service {
 
   private view(): PetStateView {
     const snapshot = this.machine.render()
+    const entry = this.activeEntry()
+    // One bubble per concurrently active session, most recent first.
+    // Sessions whose own machine has settled (no bubble copy) drop out, so a
+    // finished turn does not leave a stale bubble behind.
+    const sessions: PetSessionView[] = []
+    for (const [session, activity] of [...this.sessionActivity.entries()].reverse()) {
+      if (sessions.length >= MAX_SESSION_BUBBLES) break
+      const perSession = activity.machine.render()
+      if (perSession.bubble === undefined) continue
+      sessions.push({
+        sessionId: String(session.id),
+        animation: perSession.animation,
+        bubble: perSession.bubble,
+        phase: perSession.phase,
+      })
+    }
     // Read-only: the ledger settles on economic events only, never on a read,
     // so polling the state cannot trigger pet.json writes.
     return {
@@ -350,10 +503,15 @@ export class PetService extends Service {
       ...(snapshot.bubble === undefined ? {} : { bubble: snapshot.bubble }),
       phase: snapshot.phase,
       sessionActive: snapshot.sessionActive,
+      sessions,
       affinity: this.ledger.affinityView(Date.now()),
       display: { ...this.ledger.snapshot.display },
-      name: this.ledger.snapshot.name,
-      skin: this.ledger.snapshot.skin,
+      pet: {
+        id: entry.id,
+        displayName: entry.displayName,
+        description: entry.description,
+      },
+      name: this.petName(),
       treats: {
         stocked: this.ledger.snapshot.treats.treats,
         max: this.ledger.treatMax,

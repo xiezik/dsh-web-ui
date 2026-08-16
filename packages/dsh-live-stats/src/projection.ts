@@ -64,7 +64,10 @@ interface ActiveStep {
   step: number
   buckets: TokenUsageProjection
   exact: boolean
-  blocks: Array<OutputBlock | undefined>
+  /** Priced blocks by stream index. A plain record — never a sparse array —
+   *  so the persisted projection checkpoint stays lossless JSON even when
+   *  the model emits deltas at far-apart indices. */
+  blocks: Record<number, OutputBlock>
   /** Running sum of the per-block estimates of every non-undefined block. */
   pricedTokens: number
   /** Count of non-undefined blocks (guards the role overhead and zero case). */
@@ -78,18 +81,28 @@ interface SettledSample {
   step: number
   buckets: TokenUsageProjection
   estimated: boolean
-  /** Last measured throughput; carried across rate-less steps. */
-  tokensPerSecond: number | undefined
+  /** Last measured throughput; carried across rate-less steps (`null` when
+   *  none was ever measured, so the checkpoint stays lossless JSON). */
+  tokensPerSecond: number | null
+}
+
+interface SurfaceNode {
+  /** Surface event seq, retained in model-visible order. */
+  seq: number
+  /** Estimated token count for the message at `seq`. */
+  tokens: number
 }
 
 interface State {
   settled: TokenUsageProjection
   settledEstimates: number
   last: SettledSample | null
-  /** Surface message seq -> estimated tokens, kept in increasing seq order. */
-  surface: Map<number, number>
+  /** Priced surface in model-visible order. Replacements splice at their
+   *  declared range, so `seq` values are NOT necessarily increasing after a
+   *  compaction checkpoint lands at the surface head. */
+  surface: SurfaceNode[]
   surfaceTokens: number
-  header: EpochHeader | undefined
+  header: EpochHeader | null
   active: ActiveStep | null
 }
 
@@ -110,29 +123,23 @@ function applySurface(
 ): Pick<State, 'surface' | 'surfaceTokens'> {
   const tokens = estimateMessageTokens(surfaceMessage(event), spec)
   if (event.surfaceOp === 'append') {
-    state.surface.set(event.seq, tokens)
+    state.surface.push({ seq: event.seq, tokens })
     return {
       surface: state.surface,
       surfaceTokens: state.surfaceTokens + tokens,
     }
   }
   const operation = event.surfaceOp
-  if (!state.surface.has(operation.start) || !state.surface.has(operation.end) || operation.start > operation.end) {
+  const startIdx = state.surface.findIndex(node => node.seq === operation.start)
+  const endIdx = state.surface.findIndex(node => node.seq === operation.end)
+  if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
     throw new Error(
       'live-stats: replace at seq ' + event.seq + ' has invalid current range ' + operation.start + '-' + operation.end,
     )
   }
-  // Keys enter in increasing seq order (appends grow, and a replace's own
-  // seq is always the newest), so one pass with an early exit removes the
-  // exact range. Deleting entries while iterating a Map is safe.
   let removed = 0
-  for (const [seq, nodeTokens] of state.surface) {
-    if (seq < operation.start) continue
-    if (seq > operation.end) break
-    removed += nodeTokens
-    state.surface.delete(seq)
-  }
-  state.surface.set(event.seq, tokens)
+  for (const node of state.surface.slice(startIdx, endIdx + 1)) removed += node.tokens
+  state.surface.splice(startIdx, endIdx - startIdx + 1, { seq: event.seq, tokens })
   return {
     surface: state.surface,
     surfaceTokens: state.surfaceTokens - removed + tokens,
@@ -226,7 +233,7 @@ function exactStep(step: ActiveStep, usage: TokenUsage, time: number): ActiveSte
     exact: true,
     // The exact usage supersedes every block priced from streamed deltas;
     // retain only the exact buckets so later deltas cannot re-estimate.
-    blocks: [],
+    blocks: {},
     pricedTokens: 0,
     pricedBlocks: 0,
     ...(usage.outputTokens > 0
@@ -253,8 +260,8 @@ function view(state: State): LiveTokenUsageProjection {
   // step before its first chunk) and after a rate-less step settles — the
   // stats band must not flicker while the other groups stay put.
   const rate = active === null
-    ? state.last?.tokensPerSecond
-    : rateOf(active) ?? state.last?.tokensPerSecond
+    ? state.last?.tokensPerSecond ?? undefined
+    : rateOf(active) ?? state.last?.tokensPerSecond ?? undefined
   return {
     ...buckets,
     estimated: estimates > 0,
@@ -276,9 +283,9 @@ export function createLiveTokenUsageProjectionDefinition(
       settled: zeroBuckets(),
       settledEstimates: 0,
       last: null,
-      surface: new Map(),
+      surface: [],
       surfaceTokens: 0,
-      header: undefined,
+      header: null,
       active: null,
     }),
     apply: (state, event: SessionEvent) => {
@@ -293,7 +300,7 @@ export function createLiveTokenUsageProjectionDefinition(
               uncachedInputTokens: estimateHeaderTokens(state.header, spec) + state.surfaceTokens,
             },
             exact: false,
-            blocks: [],
+            blocks: {},
             pricedTokens: 0,
             pricedBlocks: 0,
           },
@@ -360,7 +367,7 @@ export function createLiveTokenUsageProjectionDefinition(
             estimated: !active.exact,
             // Carry the last measured rate across a rate-less step instead of
             // clobbering it: the row stays resident (see view()).
-            tokensPerSecond: rate ?? state.last?.tokensPerSecond,
+            tokensPerSecond: rate ?? state.last?.tokensPerSecond ?? null,
           },
           active: null,
         }
@@ -380,6 +387,10 @@ export function createLiveTokenUsageProjectionDefinition(
       return next
     },
     view,
-    stateVersion: 2,
+    // Bumped with each persisted state shape change so a checkpoint row with
+    // an old shape is discarded at read time instead of revived into the new
+    // shape. v3 moved to pure-JSON (Map->Record, nulls, Record blocks); v4
+    // changes surface from a Record to an ordered array for positional folds.
+    stateVersion: 4,
   }
 }

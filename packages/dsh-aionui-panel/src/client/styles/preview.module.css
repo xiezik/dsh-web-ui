@@ -241,6 +241,7 @@
 .noTabs {
   display: flex;
   align-items: center;
+  flex: 1;
   padding: 0 10px;
   font-size: 12px;
   color: var(--aion-text-tertiary);
@@ -420,6 +421,32 @@
   color: var(--aion-text-primary);
 }
 
+/* ── mermaid diagrams ──────────────────────────────────────────────────── */
+
+/* Container that replaces a claimed ```mermaid code block; the hidden <pre>
+   stays as the fallback source. Wide diagrams scroll inside the panel. */
+.mermaidBlock {
+  margin: 10px 0;
+  padding: 12px 14px;
+  background: var(--aion-bg-2);
+  border: 1px solid var(--aion-bg-3);
+  border-radius: 6px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.mermaidBlock svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Render-in-progress placeholder pulse before the SVG lands. */
+.mermaidBlock[data-mermaid-state='pending'],
+.mermaidBlock[data-mermaid-state='rendering'] {
+  min-height: 40px;
+  opacity: 0.6;
+}
+
 .mdViewer blockquote {
   margin: 10px 0;
   padding: 4px 14px;
@@ -470,19 +497,12 @@
   border-radius: 4px;
 }
 
-/* Code viewer. */
+/* Code viewer (CodeBlock draws its own frame/padding). */
 .codeViewer {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  margin: 0;
-  padding: 12px 14px;
-  font-family: var(--aion-font-mono);
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--aion-text-primary);
-  tab-size: 2;
-  white-space: pre;
+  padding: 0;
 }
 
 /* Diff viewer. */

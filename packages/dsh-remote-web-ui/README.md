@@ -38,12 +38,16 @@ actions, and the update panel that probes and runs the update.
 - **Remote update**: the download trigger in the sidebar foot (left of the
   phone icon) opens the update panel, which probes the npm registry for the
   installed `@linxin666/dsh-*` family releases. When a newer release exists
-  the panel runs the update automatically (`pnpm update` inside the owning
-  dsh profile; when pnpm is missing it falls back to `corepack pnpm` and
-  then `npx --yes pnpm`, and on Windows the command runs through `cmd.exe`
-  so npm-installed `.cmd` shims resolve; the loopback-only
+  the panel runs the update automatically (`pnpm update --latest` inside the
+  owning dsh profile; when pnpm is missing it falls back to `corepack pnpm`
+  and then `npx --yes pnpm`, and on Windows the command runs through
+  `cmd.exe` so npm-installed `.cmd` shims resolve; the loopback-only
   `/api/update/status` + `/api/update/run` endpoints drive it) and asks for
-  a dsh web restart to pick it up. Local
+  a dsh web restart to pick it up. After a green pnpm exit the installed
+  versions are re-checked against the registry: a green exit that left every
+  version in place (e.g. the pnpm `minimumReleaseAge` gate silently skipping
+  same-day releases) is reported as a stale update with configuration
+  guidance instead of a false success. Local
   link installs (development mode) are detected and report the npm state
   without updating.
 
@@ -136,13 +140,16 @@ mounts both halves.
    - messages render with the desktop fold discipline: reasoning hides
      behind a collapsed 深度思考 disclosure, tool calls behind a collapsed
      工具 row (tap to see each call's arguments), very long answers behind
-     an explicit 展开全文 toggle, and each row carries its time — and
+     an explicit 展开全文 toggle, each row carries its time, and assistant replies render as GFM Markdown (headings / bold / italic / inline code / code blocks / lists / tables / quotes / links / images; a zero-dependency renderer escapes first and allow-lists protocols, so the mobile bundle size barely moves; KaTeX is not supported yet and will be evaluated separately), while user messages stay plain text — and
    - a composer toolbar carries the **model** picker (provider-grouped
      catalog with a 思考强度 effort section per model) and the **权限**
      picker (permission presets; 完全权限 requires an explicit confirm
      step). Both ride the host's own `session.models` /
      `session.selectModel` RPCs and the `/permission` command — the phone
-     changes the same session settings the desktop would.
+     changes the same session settings the desktop would — plus a **显示**
+     sheet with persistent toggles for 工具调用 (tool-call disclosures) and
+     系统提示词 (injected system messages), and a 上下文 usage chip that
+     shows the latest assistant answer's context-fill percentage.
 4. The desktop badge flips to 已连接 in real time; it falls back to
    offline/断开 when the phone leaves.
 5. 刷新二维码 invalidates the old link and issues a new one. 停止 revokes

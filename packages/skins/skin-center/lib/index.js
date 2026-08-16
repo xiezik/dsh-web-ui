@@ -207,12 +207,66 @@ function wiredNames(registry) {
 }
 /**
 * Drop legacy hand-written skin rows (insert rows with a name) and old touch
-* comments. The CLI regex matched the historical @deepseek-ai scope; this
-* also matches the current @linxin666 scope so stale rows are always cleaned.
+* comments. Historical writers emitted a comment line above the row with
+* either npm scope, but the row must go regardless of the comment line,
+* indentation or scope — any leftover insert row for a ui-skin-* id plus the
+* managed section's own row produces two insert rows for one loader id, and
+* the boot fails with "duplicate loader entry id" (issue #267). Id-target
+* rows (`- id: ui-skin-xp` + `disabled: true`) carry no `name:` line and
+* must survive: they are the mutual-exclusion wiring, not inserts.
 * @param patch - raw patch file text.
 */
 function stripLegacySkinRows(patch) {
-	return patch.replace(/^    # [^\n]*\n    - id: ui-skin-[^\n]+\n      name: '@(?:deepseek-ai|linxin666)\/dsh-client-ui-skin-[^\n]+'\n/gm, "").replace(/^# \(touch\)[^\n]*\n?/gm, "").replace(/\n{3,}/g, "\n\n");
+	const lines = patch.split(/\r?\n/);
+	const kept = [];
+	for (let i = 0; i < lines.length; i += 1) {
+		const line = lines[i];
+		if (/^\s*- id:\s*(ui-skin-[a-z0-9-]+)\s*$/.exec(line) !== null) {
+			const next = lines[i + 1];
+			if ((next === void 0 ? null : /^\s*name:\s*['"]?@[a-z0-9][a-z0-9._-]*\/dsh-client-ui-skin-[^'"]*['"]?\s*$/.exec(next)) !== null) {
+				if (i > 0 && /^\s*#[^\n]*$/.test(lines[i - 1]) && kept[kept.length - 1] === lines[i - 1]) kept.pop();
+				i += 1;
+				continue;
+			}
+		}
+		kept.push(line);
+	}
+	let text = kept.join("\n").replace(/^# \(touch\)[^\n]*\n?/gm, "");
+	text = dropEmptyInserts(text);
+	return text.replace(/\n{3,}/g, "\n\n");
+}
+/** Remove `- insert:` items left with no `- id:` rows after legacy cleanup,
+* so an emptied block cannot perturb the loader or later renders. Blocks that
+* still carry rows (any plugin id, skin or not) are kept byte-for-byte. */
+function dropEmptyInserts(text) {
+	const lines = text.split("\n");
+	const out = [];
+	let i = 0;
+	while (i < lines.length) {
+		const line = lines[i];
+		const trimmed = line.trim();
+		if (/^-\s*insert:\s*$/.exec(trimmed) === null) {
+			out.push(line);
+			i += 1;
+			continue;
+		}
+		const indent = line.length - trimmed.length;
+		let j = i + 1;
+		let hasRow = false;
+		while (j < lines.length) {
+			const t = lines[j].trim();
+			if (t === "") {
+				j += 1;
+				continue;
+			}
+			if (lines[j].length - t.length <= indent) break;
+			if (!t.startsWith("#") && /^- id:/.test(t)) hasRow = true;
+			j += 1;
+		}
+		if (hasRow) for (let k = i; k < j; k += 1) out.push(lines[k]);
+		i = j;
+	}
+	return out.join("\n");
 }
 /**
 * Remove the managed skin section. Throws on an unterminated section (a
@@ -269,14 +323,18 @@ function currentActive(patch, registry = loadRegistry()) {
 	return enabled.length ? enabled[enabled.length - 1].replace("ui-skin-", "") : null;
 }
 /**
-* Whether a cordis.patch.yml text contains an `insert:` list row for `id`
-* (the row a skin bundle would contribute, as opposed to a home-layer
-* `disabled: true` id-target row). The patch format is small and line-based;
-* a YAML parser dependency is not worth the weight for this one probe.
+* Count the `insert:` list rows for a loader entry id in a patch text (the
+* rows a skin bundle would contribute, as opposed to home-layer
+* `disabled: true` id-target rows). The patch format is small and
+* line-based; a YAML parser dependency is not worth the weight for this one
+* probe. Two insert rows for one id fail the boot with "duplicate loader
+* entry id" (issue #267), so the count is what the self-heal in useSkin
+* keys on.
 * @param patch - raw patch text.
 * @param id - the loader entry id to look for.
 */
-function patchHasInsertId(patch, id) {
+function countInsertId(patch, id) {
+	let count = 0;
 	let insertIndent = null;
 	for (const line of patch.split(/\r?\n/)) {
 		const trimmed = line.trimStart();
@@ -293,9 +351,13 @@ function patchHasInsertId(patch, id) {
 			continue;
 		}
 		const row = /^- id:\s*['"]?([^'"]+)['"]?\s*$/.exec(trimmed);
-		if (row !== null && row[1] === id) return true;
+		if (row !== null && row[1] === id) count += 1;
 	}
-	return false;
+	return count;
+}
+/** Whether a patch contains at least one insert row for `id` (see countInsertId). */
+function patchHasInsertId(patch, id) {
+	return countInsertId(patch, id) > 0;
 }
 /**
 * Bundle entries from the active profile manifest's `dsh.profile.bundles` —
@@ -428,6 +490,51 @@ function registryWithProfileWiring(registry, profileModulesDir, profileManifestP
 	return out;
 }
 /**
+* Derive the running harness home + profile from the skin-center package's
+* own install location — the one authority that is true regardless of how
+* the GUI was launched (issue #254: no DSH_PROFILE env var, cwd outside
+* profiles/<name>, so every legacy fallback ends on the wrong profile).
+* Both the literal module path and its realpath are scanned, because profile
+* node_modules entries are commonly symlinks (per-skin links, pnpm store):
+* the literal chain preserves the profiles/<name>/node_modules segment while
+* the realpath chain covers store-resolved loads. The first ancestor matching
+* <harnessHome>/profiles/<name>/node_modules wins; the inner node_modules
+* under .pnpm/<pkg> never matches because its grandparent is .pnpm, not
+* profiles.
+* @param fromUrl - the module URL to resolve from (defaults to this module's
+*   own import.meta.url); injectable so tests can place the module inside a
+*   simulated install layout.
+* @returns the harness home (already the .dsh dir — no suffix is appended)
+*   and the profile name, or null when the module is not installed under a
+*   profiles tree (monorepo dev checkout — callers keep their legacy
+*   fallbacks).
+*/
+function resolveInstallLayout(fromUrl = import.meta.url) {
+	const starts = [fileURLToPath(fromUrl)];
+	try {
+		const real = realpathSync(starts[0]);
+		if (real !== starts[0]) starts.push(real);
+	} catch {}
+	for (const start of starts) {
+		let current = dirname(start);
+		for (;;) {
+			if (basename(current) === "node_modules") {
+				const profileDir = dirname(current);
+				const profilesDir = dirname(profileDir);
+				const profile = basename(profileDir);
+				if (basename(profilesDir) === "profiles" && profile !== "" && profile !== "." && profile !== ".." && profile !== "node_modules") return {
+					harnessHome: dirname(profilesDir),
+					profile
+				};
+			}
+			const parent = dirname(current);
+			if (parent === current) break;
+			current = parent;
+		}
+	}
+	return null;
+}
+/**
 * First non-blank string in a list of candidate values. Whitespace-only
 * values (including environment variables set to spaces) count as unset.
 */
@@ -444,36 +551,25 @@ function firstNonBlank(...values) {
 *  - otherwise a trimmed non-empty `$DSH_HOME` is the harness home directly
 *    (dsh's `resolveDshHome()` contract — the env var already points at the
 *    `.dsh` directory, so no suffix is appended);
+*  - otherwise the harness home derived from this package's install layout
+*    (issue #254: the launcher may have configured the home without any env
+*    var reaching this process) — already the `.dsh` dir, no suffix;
 *  - otherwise `homedir()/.dsh`.
 * @param optsHome - injectable HOME (tests); default resolves from env/homedir.
 * @param env - environment map (defaults to process.env).
+* @param installHome - harness home from resolveInstallLayout (no suffix).
 */
-function resolveHarnessHome(optsHome, env = process.env) {
+function resolveHarnessHome(optsHome, env = process.env, installHome) {
 	if (optsHome !== void 0) return join(optsHome, ".dsh");
-	return firstNonBlank(env.DSH_HOME) ?? join(homedir(), ".dsh");
+	return firstNonBlank(env.DSH_HOME, installHome) ?? join(homedir(), ".dsh");
 }
 /**
-* Resolve the profile the skin switch must operate against (the profile the
-* GUI is actually running in). Precedence, first non-blank wins:
-*   1. explicit opts.profile;
-*   2. `$DSH_SKIN_PROFILE`;
-*   3. `$DSH_PROFILE` (the generic dsh profile override);
-*   4. `process.cwd()` when it is a directory directly under
-*      `<harnessHome>/profiles/<name>` — return that `<name>`;
-*   5. `web`.
-* Pure and injectable so tests can exercise every precedence level without
-* mutating the process. `useSkin`/`currentSkin` call it with the same
-* harness-home-derived profiles root the path resolver uses.
-* @param optsProfile - explicit profile override.
-* @param env - environment map (defaults to process.env).
-* @param cwd - current working directory (defaults to process.cwd()).
-* @param profilesRoot - `<harnessHome>/profiles` dir (defaults to the root
-*   derived from env/homedir).
+* The profile name when cwd sits directly under `<harnessHome>/profiles/<name>`
+* — else undefined. Pure so resolvePaths can reuse it with an install-derived
+* profiles root while resolveProfile keeps its own signature for callers.
 */
-function resolveProfile(optsProfile, env = process.env, cwd = process.cwd(), profilesRoot) {
-	const explicit = firstNonBlank(optsProfile, env.DSH_SKIN_PROFILE, env.DSH_PROFILE);
-	if (explicit !== void 0) return explicit;
-	const root = resolve(profilesRoot ?? join(resolveHarnessHome(void 0, env), "profiles"));
+function profileFromCwd(cwd, profilesRoot) {
+	const root = resolve(profilesRoot);
 	const normalizedCwd = resolve(cwd);
 	const canonicalDir = (p) => {
 		try {
@@ -488,17 +584,25 @@ function resolveProfile(optsProfile, env = process.env, cwd = process.cwd(), pro
 			if (name !== "" && statSync(normalizedCwd, { throwIfNoEntry: false })?.isDirectory() === true) return name;
 		} catch {}
 	}
-	return "web";
 }
 /**
 * Resolve the DSH paths under a HOME. home/profile are injectable so tests
 * can point at a throwaway HOME (mirrors scripts/dsh-skin.test.mjs).
+* Precedence for the harness home: injected home > $DSH_HOME > install
+* layout > homedir()/.dsh. For the profile: injected profile >
+* $DSH_SKIN_PROFILE > $DSH_PROFILE > cwd under profiles/<name> > install
+* layout profile > web (issue #254: the install layout is what makes a
+* non-web profile resolve when no env var or cwd hint exists).
 * @param home - home dir (defaults to $DSH_HOME or the process HOME).
-* @param profile - profile name (defaults via resolveProfile precedence).
+* @param profile - profile name (defaults via the precedence above).
+* @param fromUrl - module URL the install layout is derived from (defaults
+*   to this module's import.meta.url); injectable for tests.
 */
-function resolvePaths(home, profile) {
-	const harnessHome = resolveHarnessHome(home);
-	const activeProfile = resolveProfile(profile, process.env, process.cwd(), join(harnessHome, "profiles"));
+function resolvePaths(home, profile, fromUrl = import.meta.url) {
+	const install = resolveInstallLayout(fromUrl);
+	const harnessHome = resolveHarnessHome(home, process.env, install?.harnessHome);
+	const profilesRoot = join(harnessHome, "profiles");
+	const activeProfile = firstNonBlank(profile, process.env.DSH_SKIN_PROFILE, process.env.DSH_PROFILE) ?? profileFromCwd(process.cwd(), profilesRoot) ?? install?.profile ?? "web";
 	return {
 		patchPath: join(harnessHome, "cordis.patch.yml"),
 		profileModulesDir: join(harnessHome, "profiles", activeProfile, "node_modules"),
@@ -706,9 +810,22 @@ function useSkin(name, opts = {}) {
 		if (problem !== null) throw new Error(problem);
 		renderRegistry = registryWithProfileWiring(registry, paths.profileModulesDir, paths.profileManifestPath);
 	}
-	const next = `${stripLegacySkinRows(stripManaged(readPatch(paths.patchPath))).replace(/\s+$/, "")}\n\n${renderManaged(official ? null : name, renderRegistry)}\n`;
+	const patch = stripLegacySkinRows(stripManaged(readPatch(paths.patchPath)));
+	let next = `${patch.replace(/\s+$/, "")}\n\n${renderManaged(official ? null : name, renderRegistry)}\n`;
+	let skippedInsert = false;
+	if (!official && countInsertId(next, renderRegistry[name].id) > 1) {
+		const wired = {
+			...renderRegistry,
+			[name]: {
+				...renderRegistry[name],
+				bundleWired: true
+			}
+		};
+		next = `${patch.replace(/\s+$/, "")}\n\n${renderManaged(name, wired)}\n`;
+		skippedInsert = true;
+	}
 	writePatchAtomic(paths.patchPath, next);
-	return official ? "restored the official stock look — the config watcher applies it within seconds; refresh the page to see it." : `skin switched to "${name}" — the config watcher applies it within seconds; refresh the page (or the manifest re-fetches) to see it.`;
+	return (official ? "restored the official stock look — the config watcher applies it within seconds; refresh the page to see it." : `skin switched to "${name}" — the config watcher applies it within seconds; refresh the page (or the manifest re-fetches) to see it.`) + (skippedInsert ? " （检测到补丁中已有该皮肤的 insert 行，已跳过本层 insert，避免 duplicate loader entry id。）" : "");
 }
 /**
 * Read the active skin, mirroring `dsh-skin current` (prints the name or
@@ -1032,8 +1149,16 @@ const inject = ["webServer"];
 * scope without depending on this Host package.
 */
 const SKIN_BACKGROUND_NAMESPACE = settingsNamespace("skin-background");
-/** Runtime schema for SkinBackgroundConfig. */
-const SkinBackgroundConfigSchema = z.object({ backgroundOpacity: z.number().min(0).max(100).step(5).default(0) });
+/**
+* Runtime schema for SkinBackgroundConfig. Persists the master switch
+* (`enabled`) alongside the background strength fields.
+*/
+const SkinBackgroundConfigSchema = z.object({
+	enabled: z.boolean().default(true),
+	backgroundOpacity: z.number().min(0).max(100).step(5).default(0),
+	backgroundBlurEmpty: z.number().min(0).max(20).step(1).default(0),
+	backgroundBlurContent: z.number().min(0).max(20).step(1).default(0)
+});
 /**
 * Register the skin-center API routes.
 *

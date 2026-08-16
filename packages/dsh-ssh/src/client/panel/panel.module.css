@@ -8,7 +8,8 @@
 
 /* --- center-column takeover (global rules, attribute-scoped) ----------------- */
 
-[data-pane='conversation'] {
+[data-pane='conversation'],
+[class*='centerCol'] {
   position: relative;
 }
 
@@ -130,6 +131,12 @@ html[data-dsh-ssh-active]:not([data-dsh-taskboard-active]) [class*='centerCol'] 
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
+}
+
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* --- tab bar ------------------------------------------------------------------ */

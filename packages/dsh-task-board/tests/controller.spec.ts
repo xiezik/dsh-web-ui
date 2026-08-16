@@ -74,6 +74,34 @@ function seedTask(store: InMemoryTaskStore, overrides: Partial<Parameters<typeof
   return task
 }
 
+describe('BoardController execution options', () => {
+  it('starts with empty picker option sets and merges partial updates', () => {
+    const { controller } = makeController()
+    expect(controller.getSnapshot().executionOptions).toEqual({ workspaces: [], presets: [] })
+    controller.setExecutionOptions({ workspaces: [{ workspaceId: 'ws-1', title: 'One' }] })
+    expect(controller.getSnapshot().executionOptions.workspaces).toEqual([{ workspaceId: 'ws-1', title: 'One' }])
+    expect(controller.getSnapshot().executionOptions.presets).toEqual([])
+    controller.setExecutionOptions({ presets: [{ id: 'anchored', isDefault: true }] })
+    expect(controller.getSnapshot().executionOptions).toEqual({
+      workspaces: [{ workspaceId: 'ws-1', title: 'One' }],
+      presets: [{ id: 'anchored', isDefault: true }],
+    })
+  })
+
+  it('creates tasks carrying execution targets and updates them back', () => {
+    const { controller } = makeController()
+    const task = controller.createTask({ title: 'x', description: '', prompt: '', workspaceId: 'ws-1', mode: 'anchored', permission: 'read-only' })
+    expect(task?.workspaceId).toBe('ws-1')
+    expect(task?.mode).toBe('anchored')
+    expect(task?.permission).toBe('read-only')
+    controller.updateTask(task!.id, { workspaceId: undefined, mode: undefined, permission: undefined })
+    const after = controller.getSnapshot().tasks[0]
+    expect(after.workspaceId).toBeUndefined()
+    expect(after.mode).toBeUndefined()
+    expect(after.permission).toBeUndefined()
+  })
+})
+
 describe('BoardController lifecycle', () => {
   it('loads the persisted ledger on start', () => {
     const { controller, store } = makeController()
@@ -84,6 +112,20 @@ describe('BoardController lifecycle', () => {
     })
     reloaded.start()
     expect(reloaded.getSnapshot().tasks.map(task => task.id)).toEqual(['task-a'])
+  })
+
+  it('reloadFromStore replaces the in-memory ledger from the persisted store, silently', () => {
+    const { controller, store } = makeController()
+    controller.createTask({ title: 'a', description: '', prompt: '' })
+    // A sibling tab deletes the task behind this controller's back (the
+    // persisted store is rewritten); the scheduler-facing reload must pick
+    // the freshest truth up without re-rendering UI subscribers.
+    store.save([])
+    let notified = 0
+    controller.subscribe(() => { notified += 1 })
+    controller.reloadFromStore()
+    expect(controller.getSnapshot().tasks).toEqual([])
+    expect(notified).toBe(0)
   })
 
   it('dispose unsubscribes (no more notifications)', () => {
@@ -104,6 +146,20 @@ describe('task mutations', () => {
     expect(controller.getSnapshot().tasks).toHaveLength(1)
     expect(store.load()[0].title).toBe('新任务')
     expect(controller.createTask({ title: '   ', description: '', prompt: '' })).toBeUndefined()
+  })
+
+  it('uses the default uuid path to mint UUIDv4 task ids', () => {
+    const controller = new BoardController({
+      store: new InMemoryTaskStore(),
+      exec: new StubExec() as unknown as ExecutionService,
+      sessions: new FakeSessions(),
+      now: () => NOW,
+    })
+    controller.start()
+    const task = controller.createTask({ title: 'x', description: '', prompt: '' })!
+    expect(task.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+    // crypto.randomUUID is available under node, so the result is provider-agnostic.
+    expect(task.id).not.toMatch(/^t-/)
   })
 
   it('deletes and clears the selection when the selected task is removed', () => {

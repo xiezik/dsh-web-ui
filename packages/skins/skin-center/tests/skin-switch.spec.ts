@@ -24,6 +24,7 @@ import {
   MANAGED_END,
   renderManaged,
   stripManaged,
+  stripLegacySkinRows,
   currentActive,
   loadRegistry,
   wiredNames,
@@ -31,6 +32,7 @@ import {
   currentSkin,
   resolvePaths,
   resolveHarnessHome,
+  resolveInstallLayout,
   resolveProfile,
   activeSkinIsBundleWired,
   resolveSkinsDir,
@@ -292,6 +294,11 @@ describe('harness home resolution (issue #120: DSH_HOME)', () => {
     const dshHome = mkdtempSync(join(tmpdir(), 'skin-switch-use-dsh-home-'))
     try {
       withEnv({ DSH_HOME: dshHome }, () => {
+        // patchPath guard before useSkin: a resolvePaths regression must fail
+        // here instead of letting useSkin write into the real ~/.dsh.
+        const paths = resolvePaths()
+        expect(paths.patchPath).toBe(join(dshHome, 'cordis.patch.yml'))
+        expect(paths.patchPath).not.toBe(join(homedir(), '.dsh', 'cordis.patch.yml'))
         useSkin('official', {})
         expect(existsSync(join(dshHome, 'cordis.patch.yml'))).toBe(true)
         expect(currentSkin(undefined, {})).toBe('none')
@@ -383,6 +390,53 @@ describe('running profile resolution (issue #155: non-default profile)', () => {
   })
 })
 
+describe('install-layout resolution (issue #254: running profile with no env/cwd hint)', () => {
+  it('resolveInstallLayout finds harness home and profile from a plain node_modules chain', () => {
+    const h = fakeHome()
+    const pkgDir = join(h, '.dsh', 'profiles', 'web-ui', 'node_modules', '@linxin666', 'dsh-client-ui-skin-center')
+    mkdirSync(pkgDir, { recursive: true })
+    const layout = resolveInstallLayout(pathToFileURL(join(pkgDir, 'index.js')).href)
+    expect(layout).toEqual({ harnessHome: join(h, '.dsh'), profile: 'web-ui' })
+  })
+
+  it('resolveInstallLayout sees through the pnpm virtual-store chain', () => {
+    const h = fakeHome()
+    const pkgDir = join(h, '.dsh', 'profiles', 'web-ui', 'node_modules', '.pnpm', '@linxin666+dsh-client-ui-skin-center@0.1.16', 'node_modules', '@linxin666', 'dsh-client-ui-skin-center')
+    mkdirSync(pkgDir, { recursive: true })
+    const layout = resolveInstallLayout(pathToFileURL(join(pkgDir, 'index.js')).href)
+    expect(layout).toEqual({ harnessHome: join(h, '.dsh'), profile: 'web-ui' })
+  })
+
+  it('resolveInstallLayout returns null outside a profiles tree (monorepo dev checkout)', () => {
+    const h = fakeHome()
+    const pkgDir = join(h, 'code', 'dsh-web-ui', 'packages', 'skins', 'skin-center')
+    mkdirSync(pkgDir, { recursive: true })
+    expect(resolveInstallLayout(pathToFileURL(join(pkgDir, 'index.js')).href)).toBeNull()
+  })
+
+  it('resolvePaths falls back to the install profile when env and cwd give nothing', () => {
+    const h = fakeHome()
+    const pkgDir = join(h, '.dsh', 'profiles', 'web-ui', 'node_modules', '@linxin666', 'dsh-client-ui-skin-center')
+    mkdirSync(pkgDir, { recursive: true })
+    withEnv({ DSH_HOME: undefined, DSH_PROFILE: undefined, DSH_SKIN_PROFILE: undefined }, () => {
+      const paths = resolvePaths(undefined, undefined, pathToFileURL(join(pkgDir, 'index.js')).href)
+      expect(paths.patchPath).toBe(join(h, '.dsh', 'cordis.patch.yml'))
+      expect(paths.profileModulesDir).toBe(join(h, '.dsh', 'profiles', 'web-ui', 'node_modules'))
+      expect(paths.profileManifestPath).toBe(join(h, '.dsh', 'profiles', 'web-ui', 'package.json'))
+    })
+  })
+
+  it('an explicit profile env var still beats the install profile', () => {
+    const h = fakeHome()
+    const pkgDir = join(h, '.dsh', 'profiles', 'web-ui', 'node_modules', '@linxin666', 'dsh-client-ui-skin-center')
+    mkdirSync(pkgDir, { recursive: true })
+    withEnv({ DSH_HOME: undefined, DSH_PROFILE: 'wui', DSH_SKIN_PROFILE: undefined }, () => {
+      const paths = resolvePaths(undefined, undefined, pathToFileURL(join(pkgDir, 'index.js')).href)
+      expect(paths.profileModulesDir).toBe(join(h, '.dsh', 'profiles', 'wui', 'node_modules'))
+    })
+  })
+})
+
 describe('useSkin / currentSkin against a throwaway HOME', () => {
   it('use official restores the stock look, preserving custom rows', () => {
     const h = fakeHome()
@@ -424,6 +478,11 @@ describe('useSkin / currentSkin against a throwaway HOME', () => {
       qq98: { ...qq98, dir: fakeDir },
     }
     writeFileSync(patchPath(h), '')
+    // patchPath guard before useSkin: the throwaway home owns the write
+    // target, never the real ~/.dsh.
+    const paths = resolvePaths(h)
+    expect(paths.patchPath).toBe(patchPath(h))
+    expect(paths.patchPath).not.toBe(join(homedir(), '.dsh', 'cordis.patch.yml'))
     const message = useSkin('qq98', { home: h, registry: fakeRegistry })
     const after = readFileSync(patchPath(h), 'utf8')
     expect(after).toContain('- insert:')
@@ -682,6 +741,73 @@ describe('home patch lifecycle vs installed skin bundles (issue #108/#148)', () 
     expect(lstatSync(link).isSymbolicLink()).toBe(true)
     expect(realpathSync(link)).toBe(realpathSync(carrierSkin))
     expect(carrierSkin).toContain(join('dsh-skins', 'skins'))
+  })
+})
+
+describe('legacy row cleanup and duplicate insert self-heal (issue #267)', () => {
+  it('stripLegacySkinRows removes legacy insert rows regardless of comment line, indent or scope', () => {
+    const patch = [
+      '# header',
+      '- insert:',
+      '    # legacy comment (historical writer style)',
+      '    - id: ui-skin-qq98',
+      "      name: '@deepseek-ai/dsh-client-ui-skin-qq98'",
+      '- insert:',
+      '  - id: ui-skin-ths',
+      "    name: '@linxin666/dsh-client-ui-skin-ths'",
+      '- id: ui-skin-xp',
+      '  disabled: true',
+      '- insert:',
+      '    - id: memory-mem0',
+      "      name: '@deepseek-ai/dsh-mcp-client'",
+      '# footer',
+    ].join('\n')
+    const stripped = stripLegacySkinRows(patch)
+    // Both legacy insert rows are gone (comment line, indentation and npm
+    // scope must not protect them — any leftover row plus the managed
+    // section's own row would double-insert one loader id and fail the boot).
+    expect(stripped).not.toContain('ui-skin-qq98')
+    expect(stripped).not.toContain('ui-skin-ths')
+    expect(stripped).not.toContain('legacy comment')
+    // Id-target rows are mutual-exclusion wiring, not inserts — they survive.
+    expect(stripped).toContain('- id: ui-skin-xp\n  disabled: true')
+    // Non-skin insert blocks survive untouched; emptied skin blocks collapse.
+    expect(stripped).toContain('memory-mem0')
+    expect(stripped.match(/- insert:/g)).toHaveLength(1)
+    expect(stripped).toContain('# header')
+    expect(stripped).toContain('# footer')
+  })
+
+  it('useSkin drops its own insert row when a same-id insert row already exists elsewhere', () => {
+    const h = fakeHome()
+    const registry = loadRegistry()
+    const qq98 = registry.qq98
+    const fakeDir = join(h, 'code', 'dsh-web-ui', 'packages', 'skins', 'qq98')
+    makeSkinPackage(fakeDir, qq98)
+    const fakeRegistry: Record<string, SkinSwitchEntry> = {
+      ...registry,
+      qq98: { ...qq98, dir: fakeDir },
+    }
+    // A pre-existing insert row for ui-skin-qq98 whose name line does not
+    // match the legacy cleanup's package pattern — the last-resort guard must
+    // still refuse to write a second insert row for the same loader id.
+    writeFileSync(patchPath(h), [
+      '# custom rows',
+      '- insert:',
+      '    - id: ui-skin-qq98',
+      '      name: qq98',
+      '',
+    ].join('\n'))
+    const message = useSkin('qq98', { home: h, registry: fakeRegistry })
+    const after = readFileSync(patchPath(h), 'utf8')
+    // Exactly one insert row for the id (the pre-existing one); the managed
+    // section only carries mutual-exclusion rows.
+    expect(after.match(/- id: ui-skin-qq98/g)).toHaveLength(1)
+    expect(after).toContain('- id: ui-skin-qq98\n      name: qq98')
+    expect(after).not.toContain('- id: ui-skin-qq98\n      name: \'@linxin666/dsh-client-ui-skin-qq98\'')
+    expect(after).toContain(`- id: ${registry.ths.id}\n  disabled: true`)
+    expect(message).toContain('已跳过本层 insert')
+    expect(currentSkin(after, { home: h, registry: fakeRegistry })).toBe('qq98')
   })
 })
 

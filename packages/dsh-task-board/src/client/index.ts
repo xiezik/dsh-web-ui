@@ -9,7 +9,7 @@
  * plugin must not take the GUI down.
  */
 import type { ClientContext, SessionId, SettingsScope, SettingsScopeSpec, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import type { ConnectionHandle, PromptContentPart } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale) and its
 // LocaleNamespaceMap merge table.
@@ -92,13 +92,19 @@ export function apply(ctx: ClientContext): void {
   const binder = ctx.get('webUiSettings') ?? ctx.settingsScope
   const settingsScope = binder.bind<TaskBoardSettings>({ namespace: TASK_BOARD_NS })
   const settingsCard = new TaskBoardSettingsCardController(settingsScope)
-  ctx.slots.inject('web-ui.plugin.item', () => ctx.slots.register({
-    name: 'web-ui.plugin.item',
-    id: 'task-board',
-    order: 110,
-    locale: NS,
-    inject: () => settingsCard.inject(),
-  }, TaskBoardSettingsCard))
+  ctx.slots.inject('web-ui.plugin.item', () => {
+    const unregister = ctx.slots.register({
+      name: 'web-ui.plugin.item',
+      id: 'task-board',
+      order: 110,
+      locale: NS,
+      inject: () => settingsCard.inject(),
+    }, TaskBoardSettingsCard)
+    return () => {
+      settingsCard.dispose()
+      unregister()
+    }
+  })
 
   // The sidebar entry and board view mount once the settings scope settles;
   // while the scope is still loading, the composition default is unknown, so
@@ -116,11 +122,39 @@ export function apply(ctx: ClientContext): void {
     const exec = new ExecutionService({
       sessions: {
         list: sessions.list,
-        binding: id => sessions.binding(id as SessionId),
+        binding: id => {
+          const binding = sessions.binding(id as SessionId)
+          if (binding === undefined) return undefined
+          const { session } = binding
+          return {
+            session: {
+              rename: title => session.rename(title),
+              prompt: (content, mode) =>
+                session.prompt(content as PromptContentPart[], mode).then(result =>
+                  result.ok ? { ok: true as const } : { ok: false as const, error: result.error }),
+              command: line =>
+                session.command(line).then(result =>
+                  result.ok ? { ok: true as const, matched: result.value.matched } : { ok: false as const, error: result.error }),
+              getSnapshot: () => session.getSnapshot(),
+              subscribe: fn => session.subscribe(fn),
+            },
+          }
+        },
+        noteAgentPreset: (sessionId, agentPreset) => sessions.noteAgentPreset(sessionId as SessionId, agentPreset),
       },
       workspaces: {
         list: workspaces.list,
         connectWorkspace: id => workspaces.connectWorkspace(id as WorkspaceId),
+      },
+      presets: {
+        select: async (sessionId, agentPreset) => {
+          try {
+            const response = await connection.api.agentPresets.select({ sessionId: sessionId as SessionId, agentPreset })
+            return response.result.ok ? { ok: true as const } : { ok: false as const, error: response.result.error }
+          } catch (error) {
+            return { ok: false as const, error }
+          }
+        },
       },
       history: {
         loadTail: async sessionId => {
@@ -150,6 +184,9 @@ export function apply(ctx: ClientContext): void {
     // not-yet-ready runtime; tab visibility recovery ticks immediately.
     const scheduler = new SchedulerService({
       tasks: () => controller.getSnapshot().tasks,
+      // Re-read the persisted ledger before every fire decision: a task
+      // deleted in another tab must never fire from a stale in-memory copy.
+      refresh: () => controller.reloadFromStore(),
       now: () => Date.now(),
       runTask: id => controller.runTask(id),
       applySchedule: (id, nextRunAt, lastTriggeredAt) =>
@@ -163,6 +200,44 @@ export function apply(ctx: ClientContext): void {
     scheduler.start()
 
     const disposers: Array<() => void> = []
+
+    // Execution-target option feeds: the workspace list drives the workspace
+    // picker, and the agent-preset roster drives the mode picker. Both are
+    // runtime facts (not ledger state), so the wiring pushes them into the
+    // controller on change; the preset roster is re-read after reconnects
+    // because a reconnect may serve a different deployment.
+    const pushWorkspaceOptions = (): void => {
+      const snapshot = workspaces.list.getSnapshot()
+      controller.setExecutionOptions({
+        workspaces: snapshot.items.map(item => ({
+          workspaceId: item.workspaceId,
+          title: item.title !== '' ? item.title : item.path,
+        })),
+      })
+    }
+    pushWorkspaceOptions()
+    disposers.push(workspaces.list.subscribe(pushWorkspaceOptions))
+    const pushPresetOptions = async (): Promise<void> => {
+      try {
+        const response = await connection.api.agentPresets.list({})
+        if (!response.result.ok) return
+        controller.setExecutionOptions({
+          presets: response.result.value.presets.map(preset => ({
+            id: preset.id,
+            name: preset.name,
+            description: preset.description,
+            broken: preset.broken,
+            isDefault: preset.isDefault,
+          })),
+        })
+      } catch (error) {
+        // A failed roster read leaves the previous options in place; the
+        // picker stays usable and the next reconnect retries the read.
+        console.error('[dsh-task-board] agent preset roster read failed', error)
+      }
+    }
+    void pushPresetOptions()
+    disposers.push(ctx.on('connection/reset', () => { void pushPresetOptions() }))
     try {
       disposers.push(mountSidebarEntry(controller))
       disposers.push(mountBoard(controller))
